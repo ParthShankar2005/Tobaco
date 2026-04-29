@@ -27,6 +27,8 @@ const TobacoLayout = () => {
   const notifications = orders
     .filter((order) => (session?.role === "admin" ? true : order.shopId === session?.shopId))
     .flatMap<OrderNotificationItem>((order) => {
+      const eventAt = order.statusUpdatedAt || order.createdAt;
+
       if (session?.role === "admin") {
         if (order.status === "pending") {
           return [
@@ -34,17 +36,17 @@ const TobacoLayout = () => {
               id: `${order.id}:pending`,
               title: `Pending: ${order.id}`,
               description: `${order.shopName} | ₹${order.subtotal}`,
-              createdAt: order.createdAt,
+              createdAt: eventAt,
             },
           ];
         }
-        if (order.status === "rejected") {
+        if (order.status === "rejected" && order.cancelledBy === "shopkeeper") {
           return [
             {
-              id: `${order.id}:cancelled`,
-              title: `Cancelled: ${order.id}`,
-              description: `${order.shopName} order cancelled`,
-              createdAt: order.createdAt,
+              id: `${order.id}:cancelled-by-shopkeeper`,
+              title: `Cancelled by Shopkeeper: ${order.id}`,
+              description: `${order.shopName} cancelled this order before approval.`,
+              createdAt: eventAt,
             },
           ];
         }
@@ -57,17 +59,17 @@ const TobacoLayout = () => {
             id: `${order.id}:accepted`,
             title: `Accepted: ${order.id}`,
             description: "Distributor accepted your order.",
-            createdAt: order.createdAt,
+            createdAt: eventAt,
           },
         ];
       }
-      if (order.status === "rejected") {
+      if (order.status === "rejected" && order.cancelledBy === "distributor") {
         return [
           {
-            id: `${order.id}:cancelled`,
-            title: `Cancelled: ${order.id}`,
+            id: `${order.id}:cancelled-by-distributor`,
+            title: `Cancelled by Distributor: ${order.id}`,
             description: "Distributor cancelled/rejected your order.",
-            createdAt: order.createdAt,
+            createdAt: eventAt,
           },
         ];
       }
@@ -77,7 +79,7 @@ const TobacoLayout = () => {
             id: `${order.id}:pending`,
             title: `Pending: ${order.id}`,
             description: "Your order is pending distributor approval.",
-            createdAt: order.createdAt,
+            createdAt: eventAt,
           },
         ];
       }

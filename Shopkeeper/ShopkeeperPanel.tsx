@@ -530,7 +530,11 @@ const ShopkeeperPanel = () => {
                       </TableCell>
                       <TableCell>
                         {order.status === "pending" ? (
-                          <Button size="sm" variant="outline" onClick={() => updateOrderStatus(order.id, "rejected")}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateOrderStatus(order.id, "rejected", "shopkeeper")}
+                          >
                             Cancel
                           </Button>
                         ) : (

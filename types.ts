@@ -2,6 +2,8 @@ export type PaymentMethod = "cash" | "online";
 export type PaymentVerificationStatus = "cash" | "pending" | "verified" | "rejected";
 
 export type OrderStatus = "pending" | "accepted" | "rejected";
+export type OrderCancellationActor = "distributor" | "shopkeeper";
+export type OrderStatusActor = OrderCancellationActor | "system";
 
 export interface ShopContact {
   id: string;
@@ -50,6 +52,9 @@ export interface OrderRecord {
   paymentVerifiedBy?: string;
   createdAt: string;
   status: OrderStatus;
+  statusUpdatedAt?: string;
+  statusUpdatedBy?: OrderStatusActor;
+  cancelledBy?: OrderCancellationActor;
   items: OrderLine[];
   subtotal: number;
   note: string;

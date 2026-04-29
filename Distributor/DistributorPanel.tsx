@@ -1010,10 +1010,10 @@ const DistributorPanel = () => {
                     <TableCell>
                       {order.status === "pending" ? (
                         <div className="flex gap-2">
-                          <Button size="sm" variant="gold" onClick={() => updateOrderStatus(order.id, "accepted")}>
+                          <Button size="sm" variant="gold" onClick={() => updateOrderStatus(order.id, "accepted", "distributor")}>
                             Accept
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => updateOrderStatus(order.id, "rejected")}>
+                          <Button size="sm" variant="destructive" onClick={() => updateOrderStatus(order.id, "rejected", "distributor")}>
                             Reject
                           </Button>
                         </div>

@@ -2,8 +2,10 @@ import { products as defaultProducts, type Product } from "@/data/products";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
+  OrderCancellationActor,
   OrderRecord,
   OrderStatus,
+  OrderStatusActor,
   PaymentMethod,
   PaymentVerificationStatus,
   PriceRule,
@@ -75,7 +77,7 @@ interface TobacoContextValue {
   getRuleForShopProduct: (shopId: string, productId: string) => PriceRule | undefined;
   resolvePrice: (shopId: string, productId: string, fallbackPrice: number) => number;
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResult>;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  updateOrderStatus: (orderId: string, status: OrderStatus, actor?: OrderStatusActor) => void;
   updateOrderPaymentVerification: (
     orderId: string,
     status: Extract<PaymentVerificationStatus, "pending" | "verified" | "rejected">,
@@ -154,6 +156,13 @@ interface OrderNotePayloadV1 {
   paymentVerificationNote: string;
   paymentVerifiedAt?: string;
   paymentVerifiedBy?: string;
+}
+
+interface OrderNotePayloadV2 extends OrderNotePayloadV1 {
+  v: 2;
+  statusUpdatedAt?: string;
+  statusUpdatedBy?: OrderStatusActor;
+  cancelledBy?: OrderCancellationActor;
 }
 
 const STORAGE_KEY = "tobaco-platform-v1";
@@ -242,6 +251,12 @@ const pruneOrdersByRetention = (orders: OrderRecord[], now = Date.now()) =>
 const defaultPaymentVerificationStatus = (paymentMethod: PaymentMethod): PaymentVerificationStatus =>
   paymentMethod === "online" ? "pending" : "cash";
 
+const isOrderStatusActor = (value: unknown): value is OrderStatusActor =>
+  value === "distributor" || value === "shopkeeper" || value === "system";
+
+const isOrderCancellationActor = (value: unknown): value is OrderCancellationActor =>
+  value === "distributor" || value === "shopkeeper";
+
 const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: PaymentMethod) => {
   const fallback = {
     shopNote: (raw ?? "").trim(),
@@ -251,17 +266,23 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
     paymentVerificationNote: "",
     paymentVerifiedAt: undefined as string | undefined,
     paymentVerifiedBy: undefined as string | undefined,
+    statusUpdatedAt: undefined as string | undefined,
+    statusUpdatedBy: undefined as OrderStatusActor | undefined,
+    cancelledBy: undefined as OrderCancellationActor | undefined,
   };
 
   if (!raw) return fallback;
 
   try {
-    const parsed = JSON.parse(raw) as Partial<OrderNotePayloadV1>;
-    if (parsed.v !== 1) return fallback;
+    const parsed = JSON.parse(raw) as Partial<OrderNotePayloadV1 | OrderNotePayloadV2>;
+    const version = Number(parsed.v ?? 1);
+    if (version !== 1 && version !== 2) return fallback;
 
     const rawStatus = String(parsed.paymentVerificationStatus ?? "");
     const isValidStatus =
       rawStatus === "cash" || rawStatus === "pending" || rawStatus === "verified" || rawStatus === "rejected";
+    const parsedStatusUpdatedBy = parsed.statusUpdatedBy;
+    const parsedCancelledBy = parsed.cancelledBy;
 
     return {
       shopNote: typeof parsed.shopNote === "string" ? parsed.shopNote : "",
@@ -273,6 +294,9 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
       paymentVerificationNote: typeof parsed.paymentVerificationNote === "string" ? parsed.paymentVerificationNote : "",
       paymentVerifiedAt: typeof parsed.paymentVerifiedAt === "string" ? parsed.paymentVerifiedAt : undefined,
       paymentVerifiedBy: typeof parsed.paymentVerifiedBy === "string" ? parsed.paymentVerifiedBy : undefined,
+      statusUpdatedAt: typeof parsed.statusUpdatedAt === "string" ? parsed.statusUpdatedAt : undefined,
+      statusUpdatedBy: isOrderStatusActor(parsedStatusUpdatedBy) ? parsedStatusUpdatedBy : undefined,
+      cancelledBy: isOrderCancellationActor(parsedCancelledBy) ? parsedCancelledBy : undefined,
     };
   } catch {
     return fallback;
@@ -280,8 +304,8 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
 };
 
 const serializeOrderNotePayload = (order: OrderRecord) => {
-  const payload: OrderNotePayloadV1 = {
-    v: 1,
+  const payload: OrderNotePayloadV2 = {
+    v: 2,
     shopNote: order.note || "",
     paymentVerificationStatus: order.paymentVerificationStatus,
     onlinePaymentReference: order.onlinePaymentReference || "",
@@ -289,6 +313,9 @@ const serializeOrderNotePayload = (order: OrderRecord) => {
     paymentVerificationNote: order.paymentVerificationNote || "",
     paymentVerifiedAt: order.paymentVerifiedAt,
     paymentVerifiedBy: order.paymentVerifiedBy,
+    statusUpdatedAt: order.statusUpdatedAt,
+    statusUpdatedBy: order.statusUpdatedBy,
+    cancelledBy: order.cancelledBy,
   };
   return JSON.stringify(payload);
 };
@@ -304,6 +331,9 @@ const normalizeOrderRecord = (order: OrderRecord): OrderRecord => {
     paymentVerificationNote: order.paymentVerificationNote ?? parsed.paymentVerificationNote,
     paymentVerifiedAt: order.paymentVerifiedAt ?? parsed.paymentVerifiedAt,
     paymentVerifiedBy: order.paymentVerifiedBy ?? parsed.paymentVerifiedBy,
+    statusUpdatedAt: order.statusUpdatedAt ?? parsed.statusUpdatedAt ?? order.createdAt,
+    statusUpdatedBy: order.statusUpdatedBy ?? parsed.statusUpdatedBy ?? "system",
+    cancelledBy: order.cancelledBy ?? parsed.cancelledBy,
   };
 };
 
@@ -518,6 +548,9 @@ const buildStateFromRemote = (
         paymentVerifiedBy: noteMeta.paymentVerifiedBy,
         createdAt: row.created_at,
         status: row.status,
+        statusUpdatedAt: noteMeta.statusUpdatedAt ?? row.created_at,
+        statusUpdatedBy: noteMeta.statusUpdatedBy ?? "system",
+        cancelledBy: noteMeta.cancelledBy,
         note: noteMeta.shopNote,
         subtotal: Number(row.subtotal),
         items: (itemMap.get(row.id) ?? []).map((item) => ({
@@ -1093,6 +1126,9 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       paymentVerifiedBy: undefined,
       createdAt: new Date().toISOString(),
       status: "pending",
+      statusUpdatedAt: new Date().toISOString(),
+      statusUpdatedBy: "shopkeeper",
+      cancelledBy: undefined,
       items,
       subtotal,
       note: note.trim(),
@@ -1177,16 +1213,32 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
     return { ok: true, message: "Order created successfully.", order };
   };
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus) => {
+  const updateOrderStatus = (orderId: string, status: OrderStatus, actor: OrderStatusActor = "system") => {
+    const target = state.orders.find((order) => order.id === orderId);
+    if (!target) return;
+
+    const nowIso = new Date().toISOString();
+    const nextOrder: OrderRecord = {
+      ...target,
+      status,
+      statusUpdatedAt: nowIso,
+      statusUpdatedBy: actor,
+      cancelledBy: status === "rejected" && (actor === "distributor" || actor === "shopkeeper") ? actor : undefined,
+    };
+
     setState((prev) => ({
       ...prev,
-      orders: prev.orders.map((order) => (order.id === orderId ? { ...order, status } : order)),
+      orders: prev.orders.map((order) => (order.id === orderId ? nextOrder : order)),
     }));
 
     if (isSupabaseConfigured) {
-      void supabase.from("orders").update({ status }).eq("id", orderId).then(({ error }) => {
-        if (error) logRemoteError(error);
-      });
+      void supabase
+        .from("orders")
+        .update({ status, note: serializeOrderNotePayload(nextOrder) })
+        .eq("id", orderId)
+        .then(({ error }) => {
+          if (error) logRemoteError(error);
+        });
     }
   };
 
