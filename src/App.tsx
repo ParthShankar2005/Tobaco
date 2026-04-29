@@ -10,7 +10,6 @@ import { TobacoProvider } from "../state";
 import TobacoLayout from "../TobacoLayout";
 import DistributorPanel from "../Distributor/DistributorPanel";
 import ShopkeeperPanel from "../Shopkeeper/ShopkeeperPanel";
-import OrderDeskPanel from "../OrderDesk/OrderDeskPanel";
 
 const queryClient = new QueryClient();
 
@@ -31,7 +30,6 @@ const App = () => (
                 <Route element={<TobacoLayout />}>
                   <Route path="/distributor" element={<Navigate to="/distributor/dashboard" replace />} />
                   <Route path="/distributor/:section" element={<DistributorPanel />} />
-                  <Route path="/order-desk" element={<OrderDeskPanel />} />
                 </Route>
               </Route>
 

@@ -25,6 +25,13 @@ const statusClassMap: Record<string, string> = {
   rejected: "bg-red-100 text-red-800",
 };
 
+const paymentStatusClassMap: Record<string, string> = {
+  cash: "bg-slate-100 text-slate-800",
+  pending: "bg-yellow-100 text-yellow-800",
+  verified: "bg-emerald-100 text-emerald-800",
+  rejected: "bg-red-100 text-red-800",
+};
+
 const formatDateTime = (date: string) =>
   new Date(date).toLocaleString("en-IN", {
     day: "2-digit",
@@ -81,6 +88,7 @@ const DistributorPanel = () => {
     getRuleForShopProduct,
     upsertPriceRule,
     updateOrderStatus,
+    updateOrderPaymentVerification,
     clearAllOrders,
   } = useTobaco();
 
@@ -90,6 +98,7 @@ const DistributorPanel = () => {
   const [selectedShopForLogin, setSelectedShopForLogin] = useState("");
   const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
   const [offerDraft, setOfferDraft] = useState<Record<string, string>>({});
+  const [paymentReviewDraft, setPaymentReviewDraft] = useState<Record<string, string>>({});
   const [resetPasswordDraft, setResetPasswordDraft] = useState<Record<string, string>>({});
   const [userDrafts, setUserDrafts] = useState<
     Record<string, { username: string; displayName: string; shopId: string; active: boolean; useGstBill: boolean }>
@@ -206,6 +215,15 @@ const DistributorPanel = () => {
       acceptedRevenue: accepted.reduce((sum, order) => sum + order.subtotal, 0),
       pendingRevenue: pending.reduce((sum, order) => sum + order.subtotal, 0),
     };
+  }, [orders]);
+
+  const paymentOrderStats = useMemo(() => {
+    const cashOrders = orders.filter((order) => order.paymentMethod === "cash").length;
+    const onlineOrders = orders.filter((order) => order.paymentMethod === "online").length;
+    const onlinePendingVerification = orders.filter(
+      (order) => order.paymentMethod === "online" && order.paymentVerificationStatus === "pending",
+    ).length;
+    return { cashOrders, onlineOrders, onlinePendingVerification };
   }, [orders]);
 
   const distributorSalesTrend = useMemo(() => {
@@ -534,6 +552,25 @@ const DistributorPanel = () => {
     });
   };
 
+  const handleVerifyOnlinePayment = (orderId: string) => {
+    updateOrderPaymentVerification(orderId, "verified", paymentReviewDraft[orderId] ?? "", distributorProfile.ownerName);
+    setPaymentReviewDraft((prev) => ({ ...prev, [orderId]: "" }));
+  };
+
+  const handleRejectOnlinePayment = (orderId: string) => {
+    const note = (paymentReviewDraft[orderId] ?? "").trim();
+    if (!note) {
+      toast({
+        title: "Reason required",
+        description: "Add reject reason before rejecting online payment.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateOrderPaymentVerification(orderId, "rejected", note, distributorProfile.ownerName);
+    setPaymentReviewDraft((prev) => ({ ...prev, [orderId]: "" }));
+  };
+
   if (!validSections.includes(section)) return <Navigate to="/distributor/dashboard" replace />;
 
   if (section === "dashboard") {
@@ -741,12 +778,122 @@ const DistributorPanel = () => {
   if (section === "orders") {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-xl">Orders</CardTitle><CardDescription>Shopkeeper orders with downloadable parcel bill.</CardDescription></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-xl">Orders</CardTitle>
+          <CardDescription>Shopkeeper orders with payment mode and online verification controls.</CardDescription>
+        </CardHeader>
         <CardContent>
-          {orders.length === 0 ? <p className="text-sm text-muted-foreground">No orders yet.</p> : (
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Cash Orders</div>
+              <div className="text-xl font-bold">{paymentOrderStats.cashOrders}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Online Orders</div>
+              <div className="text-xl font-bold">{paymentOrderStats.onlineOrders}</div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="text-xs text-muted-foreground">Online Pending Verify</div>
+              <div className="text-xl font-bold text-amber-700">{paymentOrderStats.onlinePendingVerification}</div>
+            </div>
+          </div>
+          {orders.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No orders yet.</p>
+          ) : (
             <Table>
-              <TableHeader><TableRow><TableHead>Order</TableHead><TableHead>Shop</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Approve</TableHead><TableHead>Bill</TableHead></TableRow></TableHeader>
-              <TableBody>{orders.map((order) => <TableRow key={order.id}><TableCell className="font-semibold">{order.id}</TableCell><TableCell>{order.shopName}</TableCell><TableCell>{formatDateTime(order.createdAt)}</TableCell><TableCell>₹{order.subtotal}</TableCell><TableCell><span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusClassMap[order.status]}`}>{order.status === "rejected" ? "CANCELLED" : order.status.toUpperCase()}</span></TableCell><TableCell>{order.status === "pending" ? <div className="flex gap-2"><Button size="sm" variant="gold" onClick={() => updateOrderStatus(order.id, "accepted")}>Accept</Button><Button size="sm" variant="destructive" onClick={() => updateOrderStatus(order.id, "rejected")}>Reject</Button></div> : "Finalized"}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}><FileText className="mr-1 h-4 w-4" />Print</Button><Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}><Download className="mr-1 h-4 w-4" />Download</Button></div></TableCell></TableRow>)}</TableBody>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order</TableHead>
+                  <TableHead>Shop</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Approve</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead>Verify Payment</TableHead>
+                  <TableHead>Bill</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orders.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-semibold">{order.id}</TableCell>
+                    <TableCell>{order.shopName}</TableCell>
+                    <TableCell>{formatDateTime(order.createdAt)}</TableCell>
+                    <TableCell>₹{order.subtotal}</TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusClassMap[order.status]}`}>
+                        {order.status === "rejected" ? "CANCELLED" : order.status.toUpperCase()}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {order.status === "pending" ? (
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="gold" onClick={() => updateOrderStatus(order.id, "accepted")}>
+                            Accept
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => updateOrderStatus(order.id, "rejected")}>
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        "Finalized"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-xs font-medium uppercase">{order.paymentMethod}</div>
+                      {order.paymentMethod === "online" && order.onlinePaymentReference ? (
+                        <div className="text-[11px] text-muted-foreground">{order.onlinePaymentReference}</div>
+                      ) : null}
+                      <div className="mt-1">
+                        <span
+                          className={`rounded-full px-2 py-1 text-[11px] font-semibold ${paymentStatusClassMap[order.paymentVerificationStatus]}`}
+                        >
+                          {order.paymentVerificationStatus.toUpperCase()}
+                        </span>
+                      </div>
+                      {order.paymentVerificationNote ? (
+                        <div className="mt-1 text-[11px] text-muted-foreground">{order.paymentVerificationNote}</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      {order.paymentMethod === "online" ? (
+                        <div className="space-y-2">
+                          <Input
+                            value={paymentReviewDraft[order.id] ?? ""}
+                            onChange={(event) =>
+                              setPaymentReviewDraft((prev) => ({ ...prev, [order.id]: event.target.value }))
+                            }
+                            placeholder="verify note / reject reason"
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleVerifyOnlinePayment(order.id)}>
+                              Verify
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => handleRejectOnlinePayment(order.id)}>
+                              Reject
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Cash payment</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}>
+                          <FileText className="mr-1 h-4 w-4" />
+                          Print
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>
+                          <Download className="mr-1 h-4 w-4" />
+                          Download
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
             </Table>
           )}
         </CardContent>

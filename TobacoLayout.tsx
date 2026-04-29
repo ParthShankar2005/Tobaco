@@ -102,10 +102,6 @@ const TobacoLayout = () => {
                   <LayoutDashboard className="h-4 w-4" />
                   Dashboard
                 </NavLink>
-                <NavLink to="/order-desk" className={navBaseClass} activeClassName={navActiveClass}>
-                  <ReceiptText className="h-4 w-4" />
-                  Order Desk
-                </NavLink>
                 <NavLink to="/distributor/orders" className={navBaseClass} activeClassName={navActiveClass}>
                   <ReceiptText className="h-4 w-4" />
                   Order

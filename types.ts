@@ -1,4 +1,5 @@
 export type PaymentMethod = "cash" | "online";
+export type PaymentVerificationStatus = "cash" | "pending" | "verified" | "rejected";
 
 export type OrderStatus = "pending" | "accepted" | "rejected";
 
@@ -41,6 +42,12 @@ export interface OrderRecord {
   ownerName: string;
   mobile: string;
   paymentMethod: PaymentMethod;
+  paymentVerificationStatus: PaymentVerificationStatus;
+  onlinePaymentReference: string;
+  onlinePaymentNote: string;
+  paymentVerificationNote: string;
+  paymentVerifiedAt?: string;
+  paymentVerifiedBy?: string;
   createdAt: string;
   status: OrderStatus;
   items: OrderLine[];

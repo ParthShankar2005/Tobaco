@@ -4,6 +4,7 @@ import { useRoleAuth } from "@/auth/roleAuth";
 import { useTobaco } from "../state";
 import { PaymentMethod } from "../types";
 import { downloadBillHtml } from "@/lib/bill";
+import { createRazorpayOrder, loadRazorpayCheckout, openRazorpayCheckout, razorpayKeyId } from "@/lib/razorpay";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -21,6 +22,13 @@ const validSections: ShopkeeperSection[] = ["items", "orders"];
 const statusClassMap: Record<string, string> = {
   pending: "bg-amber-100 text-amber-800",
   accepted: "bg-emerald-100 text-emerald-800",
+  rejected: "bg-red-100 text-red-800",
+};
+
+const paymentStatusClassMap: Record<string, string> = {
+  cash: "bg-slate-100 text-slate-800",
+  pending: "bg-yellow-100 text-yellow-800",
+  verified: "bg-emerald-100 text-emerald-800",
   rejected: "bg-red-100 text-red-800",
 };
 
@@ -52,6 +60,7 @@ const ShopkeeperPanel = () => {
   const { products, shops, orders, createOrder, resolvePrice, getRuleForShopProduct, updateOrderStatus } = useTobaco();
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [isRazorpayLoading, setIsRazorpayLoading] = useState(false);
   const [note, setNote] = useState("");
   const [itemSearchQuery, setItemSearchQuery] = useState("");
 
@@ -140,6 +149,117 @@ const ShopkeeperPanel = () => {
         description: "Ask distributor to map your login with a shop contact.",
         variant: "destructive",
       });
+      return;
+    }
+
+    if (paymentMethod === "online") {
+      if (!razorpayKeyId) {
+        toast({
+          title: "Razorpay not configured",
+          description: "Set VITE_RAZORPAY_KEY_ID and VITE_RAZORPAY_ORDER_ENDPOINT.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (runningTotal <= 0) {
+        toast({
+          title: "Amount missing",
+          description: "Add item quantities to generate payable amount.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const amountInPaise = Math.round(runningTotal * 100);
+      setIsRazorpayLoading(true);
+      try {
+        const checkoutLoaded = await loadRazorpayCheckout();
+        if (!checkoutLoaded) {
+          toast({
+            title: "Razorpay unavailable",
+            description: "Unable to load Razorpay Checkout.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const orderSeed = await createRazorpayOrder({
+          amountInPaise,
+          receipt: `shop-${Date.now()}`,
+          notes: {
+            shop_id: assignedShop.id,
+            shop_name: assignedShop.shopName,
+          },
+        });
+
+        const opened = openRazorpayCheckout({
+          orderId: orderSeed.orderId,
+          amountInPaise,
+          name: distributorProfile.businessName || "TOBACO",
+          description: `Order payment for ${assignedShop.shopName}`,
+          image: distributorProfile.logoDataUrl || undefined,
+          prefill: {
+            name: assignedShop.ownerName,
+            contact: assignedShop.mobile,
+            email: distributorProfile.email || undefined,
+          },
+          notes: {
+            shop_id: assignedShop.id,
+            order_amount: String(runningTotal),
+          },
+          onSuccess: async (response) => {
+            const result = await createOrder({
+              shopId: assignedShop.id,
+              quantities,
+              paymentMethod: "online",
+              note,
+              onlinePaymentReference: response.razorpay_payment_id,
+              onlinePaymentNote: `RZP Order: ${response.razorpay_order_id} | Signature: ${response.razorpay_signature}`,
+            });
+
+            if (!result.ok) {
+              toast({
+                title: "Order save failed",
+                description: result.message,
+                variant: "destructive",
+              });
+              return;
+            }
+
+            setQuantities({});
+            setNote("");
+            navigate("/shopkeeper/orders");
+            toast({
+              title: "Payment and order success",
+              description: `${result.order?.id} sent to distributor panel.`,
+            });
+          },
+          onFailure: (message) => {
+            toast({
+              title: "Payment failed",
+              description: message,
+              variant: "destructive",
+            });
+          },
+        });
+
+        if (!opened) {
+          toast({
+            title: "Unable to open checkout",
+            description: "Razorpay checkout was blocked. Allow popups and try again.",
+            variant: "destructive",
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to start Razorpay payment.";
+        toast({
+          title: "Razorpay error",
+          description: message,
+          variant: "destructive",
+        });
+      } finally {
+        setIsRazorpayLoading(false);
+      }
       return;
     }
 
@@ -301,8 +421,21 @@ const ShopkeeperPanel = () => {
                     Online
                   </Button>
                 </div>
-                <Button variant="gold" size="lg" onClick={() => void handleCreateOrder()} className="w-full">
-                  Create Order
+                {paymentMethod === "online" && (
+                  <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      On Create Order, you will be redirected to Razorpay payment page directly.
+                    </p>
+                  </div>
+                )}
+                <Button
+                  variant="gold"
+                  size="lg"
+                  onClick={() => void handleCreateOrder()}
+                  className="w-full"
+                  disabled={isRazorpayLoading}
+                >
+                  {paymentMethod === "online" && isRazorpayLoading ? "Opening Razorpay..." : "Create Order"}
                 </Button>
               </div>
             </div>
@@ -361,6 +494,8 @@ const ShopkeeperPanel = () => {
                     <TableHead>Items</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead>Verify</TableHead>
                   <TableHead>Action</TableHead>
                   <TableHead>Bill</TableHead>
                 </TableRow>
@@ -376,6 +511,22 @@ const ShopkeeperPanel = () => {
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusClassMap[order.status]}`}>
                           {order.status === "rejected" ? "CANCELLED" : order.status.toUpperCase()}
                         </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs font-medium uppercase">{order.paymentMethod}</div>
+                        {order.paymentMethod === "online" && order.onlinePaymentReference ? (
+                          <div className="text-[11px] text-muted-foreground">{order.onlinePaymentReference}</div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${paymentStatusClassMap[order.paymentVerificationStatus] ?? "bg-slate-100 text-slate-800"}`}
+                        >
+                          {order.paymentVerificationStatus.toUpperCase()}
+                        </span>
+                        {order.paymentVerificationNote ? (
+                          <div className="mt-1 text-[11px] text-muted-foreground">{order.paymentVerificationNote}</div>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         {order.status === "pending" ? (

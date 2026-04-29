@@ -13,8 +13,8 @@ interface RoleLoginPageProps {
 
 const roleConfig: Record<AuthRole, { title: string; description: string; hint: string }> = {
   admin: {
-    title: "Distributor / Order Desk Login",
-    description: "One shared login for Distributor panel and Order Desk panel.",
+    title: "Distributor Login",
+    description: "Shared login for distributor admin panel.",
     hint: "Demo credentials: distributor / dist@123",
   },
   shopkeeper: {

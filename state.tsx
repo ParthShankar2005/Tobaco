@@ -1,7 +1,14 @@
 import { products as defaultProducts, type Product } from "@/data/products";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { OrderRecord, OrderStatus, PaymentMethod, PriceRule, ShopContact } from "./types";
+import {
+  OrderRecord,
+  OrderStatus,
+  PaymentMethod,
+  PaymentVerificationStatus,
+  PriceRule,
+  ShopContact,
+} from "./types";
 
 interface TobacoState {
   products: Product[];
@@ -15,6 +22,8 @@ interface CreateOrderPayload {
   quantities: Record<string, number>;
   paymentMethod: PaymentMethod;
   note: string;
+  onlinePaymentReference?: string;
+  onlinePaymentNote?: string;
 }
 
 interface CreateOrderResult {
@@ -61,6 +70,12 @@ interface TobacoContextValue {
   resolvePrice: (shopId: string, productId: string, fallbackPrice: number) => number;
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResult>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  updateOrderPaymentVerification: (
+    orderId: string,
+    status: Extract<PaymentVerificationStatus, "pending" | "verified" | "rejected">,
+    verificationNote?: string,
+    verifiedBy?: string,
+  ) => void;
   clearAllOrders: () => Promise<ClearOrdersResult>;
 }
 
@@ -122,6 +137,17 @@ interface OrderItemRow {
   quantity: number | string;
   unit_price: number | string;
   line_total: number | string;
+}
+
+interface OrderNotePayloadV1 {
+  v: 1;
+  shopNote: string;
+  paymentVerificationStatus: PaymentVerificationStatus;
+  onlinePaymentReference: string;
+  onlinePaymentNote: string;
+  paymentVerificationNote: string;
+  paymentVerifiedAt?: string;
+  paymentVerifiedBy?: string;
 }
 
 const STORAGE_KEY = "tobaco-platform-v1";
@@ -207,6 +233,74 @@ const isOrderWithinRetention = (createdAt: string, now = Date.now()) => {
 const pruneOrdersByRetention = (orders: OrderRecord[], now = Date.now()) =>
   orders.filter((order) => isOrderWithinRetention(order.createdAt, now));
 
+const defaultPaymentVerificationStatus = (paymentMethod: PaymentMethod): PaymentVerificationStatus =>
+  paymentMethod === "online" ? "pending" : "cash";
+
+const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: PaymentMethod) => {
+  const fallback = {
+    shopNote: (raw ?? "").trim(),
+    paymentVerificationStatus: defaultPaymentVerificationStatus(paymentMethod),
+    onlinePaymentReference: "",
+    onlinePaymentNote: "",
+    paymentVerificationNote: "",
+    paymentVerifiedAt: undefined as string | undefined,
+    paymentVerifiedBy: undefined as string | undefined,
+  };
+
+  if (!raw) return fallback;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<OrderNotePayloadV1>;
+    if (parsed.v !== 1) return fallback;
+
+    const rawStatus = String(parsed.paymentVerificationStatus ?? "");
+    const isValidStatus =
+      rawStatus === "cash" || rawStatus === "pending" || rawStatus === "verified" || rawStatus === "rejected";
+
+    return {
+      shopNote: typeof parsed.shopNote === "string" ? parsed.shopNote : "",
+      paymentVerificationStatus: isValidStatus
+        ? (rawStatus as PaymentVerificationStatus)
+        : defaultPaymentVerificationStatus(paymentMethod),
+      onlinePaymentReference: typeof parsed.onlinePaymentReference === "string" ? parsed.onlinePaymentReference : "",
+      onlinePaymentNote: typeof parsed.onlinePaymentNote === "string" ? parsed.onlinePaymentNote : "",
+      paymentVerificationNote: typeof parsed.paymentVerificationNote === "string" ? parsed.paymentVerificationNote : "",
+      paymentVerifiedAt: typeof parsed.paymentVerifiedAt === "string" ? parsed.paymentVerifiedAt : undefined,
+      paymentVerifiedBy: typeof parsed.paymentVerifiedBy === "string" ? parsed.paymentVerifiedBy : undefined,
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const serializeOrderNotePayload = (order: OrderRecord) => {
+  const payload: OrderNotePayloadV1 = {
+    v: 1,
+    shopNote: order.note || "",
+    paymentVerificationStatus: order.paymentVerificationStatus,
+    onlinePaymentReference: order.onlinePaymentReference || "",
+    onlinePaymentNote: order.onlinePaymentNote || "",
+    paymentVerificationNote: order.paymentVerificationNote || "",
+    paymentVerifiedAt: order.paymentVerifiedAt,
+    paymentVerifiedBy: order.paymentVerifiedBy,
+  };
+  return JSON.stringify(payload);
+};
+
+const normalizeOrderRecord = (order: OrderRecord): OrderRecord => {
+  const parsed = parseOrderNotePayload(order.note, order.paymentMethod);
+  return {
+    ...order,
+    note: parsed.shopNote,
+    paymentVerificationStatus: order.paymentVerificationStatus ?? parsed.paymentVerificationStatus,
+    onlinePaymentReference: order.onlinePaymentReference ?? parsed.onlinePaymentReference,
+    onlinePaymentNote: order.onlinePaymentNote ?? parsed.onlinePaymentNote,
+    paymentVerificationNote: order.paymentVerificationNote ?? parsed.paymentVerificationNote,
+    paymentVerifiedAt: order.paymentVerifiedAt ?? parsed.paymentVerifiedAt,
+    paymentVerifiedBy: order.paymentVerifiedBy ?? parsed.paymentVerifiedBy,
+  };
+};
+
 const normalizeProduct = (
   product: Product | (Partial<Product> & { id: string }),
   index: number,
@@ -261,7 +355,9 @@ const hydrateState = (parsed?: Partial<TobacoState> | null): TobacoState => {
     ),
     shops: Array.isArray(parsed?.shops) && parsed.shops.length > 0 ? parsed.shops : fallback.shops,
     priceRules: Array.isArray(parsed?.priceRules) ? parsed.priceRules : [],
-    orders: pruneOrdersByRetention(Array.isArray(parsed?.orders) ? parsed.orders : []),
+    orders: pruneOrdersByRetention(Array.isArray(parsed?.orders) ? parsed.orders : []).map((order) =>
+      normalizeOrderRecord(order as OrderRecord),
+    ),
   };
 };
 
@@ -356,7 +452,7 @@ const orderToRow = (order: OrderRecord): OrderRow => ({
   created_at: order.createdAt,
   status: order.status,
   subtotal: order.subtotal,
-  note: order.note,
+  note: serializeOrderNotePayload(order),
 });
 
 const orderItemRows = (order: OrderRecord): OrderItemRow[] =>
@@ -398,29 +494,38 @@ const buildStateFromRemote = (
 
   const orders = orderRows
     .filter((row) => isOrderWithinRetention(row.created_at))
-    .map((row) => ({
-      id: row.id,
-      shopId: row.shop_id,
-      shopName: row.shop_name,
-      shopAddress: row.shop_address ?? "",
-      ownerName: row.owner_name,
-      mobile: row.mobile,
-      paymentMethod: row.payment_method,
-      createdAt: row.created_at,
-      status: row.status,
-      note: row.note ?? "",
-      subtotal: Number(row.subtotal),
-      items: (itemMap.get(row.id) ?? []).map((item) => ({
-        productId: item.product_id,
-        itemNumber: item.item_number ?? undefined,
-        productName: item.product_name,
-        image: item.image ?? undefined,
-        packSize: item.pack_size,
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unit_price),
-        lineTotal: Number(item.line_total),
-      })),
-    }));
+    .map((row) => {
+      const noteMeta = parseOrderNotePayload(row.note, row.payment_method);
+      return {
+        id: row.id,
+        shopId: row.shop_id,
+        shopName: row.shop_name,
+        shopAddress: row.shop_address ?? "",
+        ownerName: row.owner_name,
+        mobile: row.mobile,
+        paymentMethod: row.payment_method,
+        paymentVerificationStatus: noteMeta.paymentVerificationStatus,
+        onlinePaymentReference: noteMeta.onlinePaymentReference,
+        onlinePaymentNote: noteMeta.onlinePaymentNote,
+        paymentVerificationNote: noteMeta.paymentVerificationNote,
+        paymentVerifiedAt: noteMeta.paymentVerifiedAt,
+        paymentVerifiedBy: noteMeta.paymentVerifiedBy,
+        createdAt: row.created_at,
+        status: row.status,
+        note: noteMeta.shopNote,
+        subtotal: Number(row.subtotal),
+        items: (itemMap.get(row.id) ?? []).map((item) => ({
+          productId: item.product_id,
+          itemNumber: item.item_number ?? undefined,
+          productName: item.product_name,
+          image: item.image ?? undefined,
+          packSize: item.pack_size,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unit_price),
+          lineTotal: Number(item.line_total),
+        })),
+      } as OrderRecord;
+    });
 
   return hydrateState({ products, shops, priceRules, orders });
 };
@@ -878,7 +983,14 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
   const resolvePrice = (shopId: string, productId: string, fallbackPrice: number) =>
     getRuleForShopProduct(shopId, productId)?.customPrice ?? fallbackPrice;
 
-  const createOrder = async ({ shopId, quantities, paymentMethod, note }: CreateOrderPayload): Promise<CreateOrderResult> => {
+  const createOrder = async ({
+    shopId,
+    quantities,
+    paymentMethod,
+    note,
+    onlinePaymentReference,
+    onlinePaymentNote,
+  }: CreateOrderPayload): Promise<CreateOrderResult> => {
     const shop = state.shops.find((item) => item.id === shopId);
     if (!shop) {
       return { ok: false, message: "Please select a valid shop contact first." };
@@ -890,6 +1002,12 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
 
     if (selected.length === 0) {
       return { ok: false, message: "Select at least one item to create order." };
+    }
+
+    const normalizedPaymentReference = (onlinePaymentReference ?? "").trim();
+    const normalizedOnlinePaymentNote = (onlinePaymentNote ?? "").trim();
+    if (paymentMethod === "online" && normalizedPaymentReference.length < 4) {
+      return { ok: false, message: "For online payment, add transaction/UTR reference." };
     }
 
     const lowMoqItem = selected.find(({ product, quantity }) => quantity < product.moq);
@@ -940,6 +1058,12 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       ownerName: shop.ownerName,
       mobile: shop.mobile,
       paymentMethod,
+      paymentVerificationStatus: defaultPaymentVerificationStatus(paymentMethod),
+      onlinePaymentReference: paymentMethod === "online" ? normalizedPaymentReference : "",
+      onlinePaymentNote: paymentMethod === "online" ? normalizedOnlinePaymentNote : "",
+      paymentVerificationNote: "",
+      paymentVerifiedAt: undefined,
+      paymentVerifiedBy: undefined,
       createdAt: new Date().toISOString(),
       status: "pending",
       items,
@@ -1039,6 +1163,40 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateOrderPaymentVerification = (
+    orderId: string,
+    status: Extract<PaymentVerificationStatus, "pending" | "verified" | "rejected">,
+    verificationNote = "",
+    verifiedBy = "Distributor Admin",
+  ) => {
+    const target = state.orders.find((order) => order.id === orderId);
+    if (!target || target.paymentMethod !== "online") return;
+
+    const nowIso = new Date().toISOString();
+    const nextOrder: OrderRecord = {
+      ...target,
+      paymentVerificationStatus: status,
+      paymentVerificationNote: verificationNote.trim(),
+      paymentVerifiedAt: status === "pending" ? undefined : nowIso,
+      paymentVerifiedBy: status === "pending" ? undefined : verifiedBy,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) => (order.id === orderId ? nextOrder : order)),
+    }));
+
+    if (isSupabaseConfigured) {
+      void supabase
+        .from("orders")
+        .update({ note: serializeOrderNotePayload(nextOrder) })
+        .eq("id", orderId)
+        .then(({ error }) => {
+          if (error) logRemoteError(error);
+        });
+    }
+  };
+
   const clearAllOrders = async (): Promise<ClearOrdersResult> => {
     if (isSupabaseConfigured) {
       const { error: itemError } = await supabase.from("order_items").delete().neq("id", "");
@@ -1071,6 +1229,7 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       resolvePrice,
       createOrder,
       updateOrderStatus,
+      updateOrderPaymentVerification,
       clearAllOrders,
     }),
     [state.products, state.shops, state.priceRules, state.orders],

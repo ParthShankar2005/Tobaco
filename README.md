@@ -43,6 +43,17 @@ You can also override with env vars:
   - username: `shopkeeper`
   - password: `shop@123`
 
+## 4) Razorpay setup (online payment)
+
+Add env vars for checkout:
+
+```env
+VITE_RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxx
+VITE_RAZORPAY_ORDER_ENDPOINT=https://your-server.example.com/api/razorpay/order
+```
+
+`VITE_RAZORPAY_ORDER_ENDPOINT` must create a Razorpay Order server-side (using Key Secret) and return JSON with `orderId` (or `id`).
+
 ## Notes
 
 - This project currently uses simple username/password rows for quick setup.
