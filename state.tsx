@@ -51,6 +51,11 @@ interface DeleteProductResult {
   message: string;
 }
 
+interface DeleteShopResult {
+  ok: boolean;
+  message: string;
+}
+
 interface ClearOrdersResult {
   ok: boolean;
   message: string;
@@ -65,6 +70,7 @@ interface TobacoContextValue {
   updateProduct: (input: UpdateProductInput) => AddProductResult;
   deleteProduct: (productId: string) => Promise<DeleteProductResult>;
   addShop: (input: Omit<ShopContact, "id" | "createdAt">) => ShopContact;
+  deleteShop: (shopId: string) => Promise<DeleteShopResult>;
   upsertPriceRule: (shopId: string, productId: string, customPrice: number, offerText: string) => void;
   getRuleForShopProduct: (shopId: string, productId: string) => PriceRule | undefined;
   resolvePrice: (shopId: string, productId: string, fallbackPrice: number) => number;
@@ -944,6 +950,27 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
     return shop;
   };
 
+  const deleteShop = async (shopId: string): Promise<DeleteShopResult> => {
+    const target = state.shops.find((shop) => shop.id === shopId);
+    if (!target) return { ok: false, message: "Shop not found." };
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from("shops").delete().eq("id", shopId);
+      if (error) {
+        return { ok: false, message: `Unable to remove shop from cloud: ${error.message}` };
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      shops: prev.shops.filter((shop) => shop.id !== shopId),
+      priceRules: prev.priceRules.filter((rule) => rule.shopId !== shopId),
+      orders: prev.orders.filter((order) => order.shopId !== shopId),
+    }));
+
+    return { ok: true, message: `${target.shopName} deleted.` };
+  };
+
   const upsertPriceRule = (shopId: string, productId: string, customPrice: number, offerText: string) => {
     const now = new Date().toISOString();
     const ruleId = `pr-${shopId}-${productId}`;
@@ -1224,6 +1251,7 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       updateProduct,
       deleteProduct,
       addShop,
+      deleteShop,
       upsertPriceRule,
       getRuleForShopProduct,
       resolvePrice,

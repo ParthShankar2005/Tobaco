@@ -62,6 +62,7 @@ const formatHeatmapLabel = (value: Date) =>
   });
 
 const compactInr = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
+type DeleteTarget = { type: "item" | "shop"; id: string; label: string } | null;
 
 const DistributorPanel = () => {
   const { section: rawSection } = useParams();
@@ -75,6 +76,7 @@ const DistributorPanel = () => {
     updateShopkeeperAccount,
     deleteShopkeeperAccount,
     getDistributorProfile,
+    verifyAdminAccessKey,
   } = useRoleAuth();
   const {
     products,
@@ -84,6 +86,7 @@ const DistributorPanel = () => {
     updateProduct,
     deleteProduct,
     addShop,
+    deleteShop,
     resolvePrice,
     getRuleForShopProduct,
     upsertPriceRule,
@@ -106,6 +109,10 @@ const DistributorPanel = () => {
   const [itemSearchQuery, setItemSearchQuery] = useState("");
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
+  const [isAddShopOpen, setIsAddShopOpen] = useState(false);
+  const [isDeleteAccessOpen, setIsDeleteAccessOpen] = useState(false);
+  const [deleteAccessKey, setDeleteAccessKey] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
 
   const [contactForm, setContactForm] = useState({
     shopName: "",
@@ -443,7 +450,9 @@ const DistributorPanel = () => {
     const result = await deleteProduct(productId);
     if (!result.ok) {
       toast({ title: "Delete failed", description: result.message, variant: "destructive" });
+      return;
     }
+    toast({ title: "Item deleted", description: result.message });
   };
 
   const handleAddShop = () => {
@@ -464,6 +473,58 @@ const DistributorPanel = () => {
     setSelectedShopForPricing(shop.id);
     setSelectedShopForLogin(shop.id);
     setContactForm({ shopName: "", ownerName: "", mobile: "", whatsappNumber: "", area: "", address: "" });
+    setIsAddShopOpen(false);
+    toast({ title: "Shop added", description: `${shop.shopName} created successfully.` });
+  };
+
+  const handleDeleteShop = async (shopId: string) => {
+    const relatedAccounts = shopkeeperAccounts.filter((account) => account.shopId === shopId);
+    for (const account of relatedAccounts) {
+      const accountResult = deleteShopkeeperAccount(account.id);
+      if (!accountResult.ok) {
+        toast({
+          title: "Delete failed",
+          description: `Unable to remove linked shopkeeper (${account.username}): ${accountResult.message}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const result = await deleteShop(shopId);
+    if (!result.ok) {
+      toast({ title: "Delete failed", description: result.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Shop deleted", description: result.message });
+  };
+
+  const openDeleteAccessDialog = (target: NonNullable<DeleteTarget>) => {
+    setDeleteTarget(target);
+    setDeleteAccessKey("");
+    setIsDeleteAccessOpen(true);
+  };
+
+  const closeDeleteAccessDialog = () => {
+    setIsDeleteAccessOpen(false);
+    setDeleteAccessKey("");
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteWithAccessKey = async () => {
+    if (!deleteTarget) return;
+    const verification = verifyAdminAccessKey(deleteAccessKey);
+    if (!verification.ok) {
+      toast({ title: "Access key failed", description: verification.message, variant: "destructive" });
+      return;
+    }
+
+    if (deleteTarget.type === "item") {
+      await handleDeleteItem(deleteTarget.id);
+    } else {
+      await handleDeleteShop(deleteTarget.id);
+    }
+    closeDeleteAccessDialog();
   };
 
   const handleSavePricing = (productId: string) => {
@@ -571,6 +632,41 @@ const DistributorPanel = () => {
     setPaymentReviewDraft((prev) => ({ ...prev, [orderId]: "" }));
   };
 
+  const deleteAccessDialog = (
+    <Dialog open={isDeleteAccessOpen} onOpenChange={(open) => (open ? setIsDeleteAccessOpen(true) : closeDeleteAccessDialog())}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Access Key Required</DialogTitle>
+          <DialogDescription>
+            Enter distributor access key to delete {deleteTarget?.type ?? "record"}:{" "}
+            <span className="font-semibold">{deleteTarget?.label ?? "-"}</span>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label>Access Key</Label>
+          <Input
+            type="password"
+            value={deleteAccessKey}
+            onChange={(event) => setDeleteAccessKey(event.target.value)}
+            placeholder="Distributor password"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={closeDeleteAccessDialog}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => void handleDeleteWithAccessKey()}
+            disabled={!deleteTarget || !deleteAccessKey.trim()}
+          >
+            Confirm Delete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
   if (!validSections.includes(section)) return <Navigate to="/distributor/dashboard" replace />;
 
   if (section === "dashboard") {
@@ -639,7 +735,7 @@ const DistributorPanel = () => {
             <div className="max-w-md"><Label htmlFor="itemSearch">Search Item</Label><Input id="itemSearch" value={itemSearchQuery} onChange={(event) => setItemSearchQuery(event.target.value)} placeholder="item no or name" /></div>
             <Table>
               <TableHeader><TableRow><TableHead>Photo</TableHead><TableHead>No.</TableHead><TableHead>Name</TableHead><TableHead>Pack</TableHead><TableHead>MRP</TableHead><TableHead>SRP</TableHead><TableHead>MOQ</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
-              <TableBody>{filteredProductsForItems.map((product) => <TableRow key={product.id}><TableCell><img src={product.image || "/placeholder.svg"} alt={product.name} className="h-12 w-12 rounded-md border object-cover" /></TableCell><TableCell className="font-semibold">{product.itemNumber}</TableCell><TableCell>{product.name}</TableCell><TableCell>{product.packSize}</TableCell><TableCell>₹{product.mrp}</TableCell><TableCell>₹{product.srp}</TableCell><TableCell>{product.moq}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handleOpenEditItem(product.id)}><Pencil className="h-4 w-4" /></Button><Button size="sm" variant="destructive" onClick={() => void handleDeleteItem(product.id)}><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}</TableBody>
+              <TableBody>{filteredProductsForItems.map((product) => <TableRow key={product.id}><TableCell><img src={product.image || "/placeholder.svg"} alt={product.name} className="h-12 w-12 rounded-md border object-cover" /></TableCell><TableCell className="font-semibold">{product.itemNumber}</TableCell><TableCell>{product.name}</TableCell><TableCell>{product.packSize}</TableCell><TableCell>₹{product.mrp}</TableCell><TableCell>₹{product.srp}</TableCell><TableCell>{product.moq}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handleOpenEditItem(product.id)}><Pencil className="h-4 w-4" /></Button><Button size="sm" variant="destructive" onClick={() => openDeleteAccessDialog({ type: "item", id: product.id, label: `${product.itemNumber} - ${product.name}` })}><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}</TableBody>
             </Table>
           </CardContent>
         </Card>
@@ -679,6 +775,8 @@ const DistributorPanel = () => {
             <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setIsEditItemOpen(false)}>Cancel</Button><Button variant="burgundy" onClick={handleUpdateItem}>Save Changes</Button></div>
           </DialogContent>
         </Dialog>
+
+        {deleteAccessDialog}
       </div>
     );
   }
@@ -747,22 +845,127 @@ const DistributorPanel = () => {
     return (
       <div className="space-y-6">
         <Card>
-          <CardHeader><CardTitle className="text-xl">Shop Management</CardTitle><CardDescription>Create shop contacts.</CardDescription></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-xl">Shop Management</CardTitle>
+                <CardDescription>Create and manage shop contacts.</CardDescription>
+              </div>
+              <Button variant="burgundy" onClick={() => setIsAddShopOpen(true)}>
+                Add Shop
+              </Button>
+            </div>
+          </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2"><Label>Shop Name</Label><Input value={contactForm.shopName} onChange={(event) => setContactForm((prev) => ({ ...prev, shopName: event.target.value }))} /></div>
-              <div className="space-y-2"><Label>Owner Name</Label><Input value={contactForm.ownerName} onChange={(event) => setContactForm((prev) => ({ ...prev, ownerName: event.target.value }))} /></div>
-              <div className="space-y-2"><Label>Mobile</Label><Input value={contactForm.mobile} onChange={(event) => setContactForm((prev) => ({ ...prev, mobile: event.target.value.replace(/\D/g, "").slice(0, 10) }))} /></div>
-              <div className="space-y-2"><Label>WhatsApp</Label><Input value={contactForm.whatsappNumber} onChange={(event) => setContactForm((prev) => ({ ...prev, whatsappNumber: event.target.value.replace(/\D/g, "").slice(0, 10) }))} /></div>
-              <div className="space-y-2"><Label>Area</Label><Input value={contactForm.area} onChange={(event) => setContactForm((prev) => ({ ...prev, area: event.target.value }))} /></div>
-              <div className="space-y-2 md:col-span-2"><Label>Address</Label><Textarea rows={2} value={contactForm.address} onChange={(event) => setContactForm((prev) => ({ ...prev, address: event.target.value }))} /></div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="burgundy" onClick={handleAddShop}>Add Shop</Button>
-            </div>
-            <Table><TableHeader><TableRow><TableHead>Shop</TableHead><TableHead>Owner</TableHead><TableHead>Mobile</TableHead><TableHead>Area</TableHead></TableRow></TableHeader><TableBody>{shops.map((shop) => <TableRow key={shop.id}><TableCell>{shop.shopName}</TableCell><TableCell>{shop.ownerName}</TableCell><TableCell>{shop.mobile}</TableCell><TableCell>{shop.area}</TableCell></TableRow>)}</TableBody></Table>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Shop</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Mobile</TableHead>
+                  <TableHead>Area</TableHead>
+                  <TableHead>Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shops.map((shop) => (
+                  <TableRow key={shop.id}>
+                    <TableCell>{shop.shopName}</TableCell>
+                    <TableCell>{shop.ownerName}</TableCell>
+                    <TableCell>{shop.mobile}</TableCell>
+                    <TableCell>{shop.area}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() =>
+                          openDeleteAccessDialog({
+                            type: "shop",
+                            id: shop.id,
+                            label: shop.shopName,
+                          })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
+
+        <Dialog open={isAddShopOpen} onOpenChange={setIsAddShopOpen}>
+          <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add Shop</DialogTitle>
+              <DialogDescription>Fill all required details to create a new shop contact.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Shop Name</Label>
+                <Input
+                  value={contactForm.shopName}
+                  onChange={(event) => setContactForm((prev) => ({ ...prev, shopName: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Owner Name</Label>
+                <Input
+                  value={contactForm.ownerName}
+                  onChange={(event) => setContactForm((prev) => ({ ...prev, ownerName: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Mobile</Label>
+                <Input
+                  value={contactForm.mobile}
+                  onChange={(event) =>
+                    setContactForm((prev) => ({ ...prev, mobile: event.target.value.replace(/\D/g, "").slice(0, 10) }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>WhatsApp</Label>
+                <Input
+                  value={contactForm.whatsappNumber}
+                  onChange={(event) =>
+                    setContactForm((prev) => ({
+                      ...prev,
+                      whatsappNumber: event.target.value.replace(/\D/g, "").slice(0, 10),
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Area</Label>
+                <Input
+                  value={contactForm.area}
+                  onChange={(event) => setContactForm((prev) => ({ ...prev, area: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Address</Label>
+                <Textarea
+                  rows={2}
+                  value={contactForm.address}
+                  onChange={(event) => setContactForm((prev) => ({ ...prev, address: event.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsAddShopOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="burgundy" onClick={handleAddShop}>
+                Save Shop
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {deleteAccessDialog}
 
         <Card>
           <CardHeader><CardTitle className="text-xl">Shop-Wise Pricing</CardTitle></CardHeader>

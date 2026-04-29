@@ -44,6 +44,11 @@ interface ChangePasswordResult {
   message: string;
 }
 
+interface VerifyAccessKeyResult {
+  ok: boolean;
+  message: string;
+}
+
 interface CreateShopkeeperLoginPayload {
   shopId: string;
   username: string;
@@ -106,6 +111,7 @@ interface RoleAuthContextValue {
   getProfileForUser: (role: AuthRole, username: string) => UserProfile;
   getShopkeeperAccount: (username: string) => ShopkeeperAccount | undefined;
   saveCurrentUserProfile: (profile: Omit<UserProfile, "updatedAt">) => void;
+  verifyAdminAccessKey: (accessKey: string) => VerifyAccessKeyResult;
   changeCurrentUserPassword: (currentPassword: string, newPassword: string) => ChangePasswordResult;
   resetShopkeeperPassword: (accountId: string, newPassword: string) => ResetShopkeeperPasswordResult;
   updateShopkeeperAccount: (payload: UpdateShopkeeperAccountPayload) => UpdateShopkeeperAccountResult;
@@ -647,6 +653,15 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
 
   const getDistributorProfile = (): UserProfile => getProfileForUser("admin", adminAuth.username);
 
+  const verifyAdminAccessKey = (accessKey: string): VerifyAccessKeyResult => {
+    if (!session || session.role !== "admin") {
+      return { ok: false, message: "Only distributor can use delete access key." };
+    }
+    if (!accessKey.trim()) return { ok: false, message: "Access key is required." };
+    if (accessKey !== adminAuth.password) return { ok: false, message: "Invalid access key." };
+    return { ok: true, message: "Access key verified." };
+  };
+
   const saveCurrentUserProfile = (profile: Omit<UserProfile, "updatedAt">) => {
     if (!session) return;
     const updatedProfile: UserProfile = {
@@ -977,6 +992,7 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
       getProfileForUser,
       getShopkeeperAccount,
       saveCurrentUserProfile,
+      verifyAdminAccessKey,
       changeCurrentUserPassword,
       resetShopkeeperPassword,
       updateShopkeeperAccount,
