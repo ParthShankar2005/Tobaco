@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import NotFound from "./pages/NotFound";
 import RoleLoginPage from "./pages/RoleLoginPage";
+import PortalEntryPage from "./pages/PortalEntryPage";
 import { RequireRole, RoleAuthProvider } from "@/auth/roleAuth";
 import { TobacoProvider } from "../state";
 import TobacoLayout from "../TobacoLayout";
@@ -22,7 +23,7 @@ const App = () => (
         <RoleAuthProvider>
           <TobacoProvider>
             <Routes>
-              <Route path="/" element={<Navigate to="/shopkeeper-login" replace />} />
+              <Route path="/" element={<PortalEntryPage />} />
               <Route path="/admin-login" element={<RoleLoginPage role="admin" />} />
               <Route path="/shopkeeper-login" element={<RoleLoginPage role="shopkeeper" />} />
 
