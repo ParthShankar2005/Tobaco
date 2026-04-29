@@ -91,7 +91,6 @@ const DistributorPanel = () => {
     getRuleForShopProduct,
     upsertPriceRule,
     updateOrderStatus,
-    updateOrderPaymentVerification,
     clearAllOrders,
   } = useTobaco();
 
@@ -101,7 +100,6 @@ const DistributorPanel = () => {
   const [selectedShopForLogin, setSelectedShopForLogin] = useState("");
   const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
   const [offerDraft, setOfferDraft] = useState<Record<string, string>>({});
-  const [paymentReviewDraft, setPaymentReviewDraft] = useState<Record<string, string>>({});
   const [resetPasswordDraft, setResetPasswordDraft] = useState<Record<string, string>>({});
   const [userDrafts, setUserDrafts] = useState<
     Record<string, { username: string; displayName: string; shopId: string; active: boolean; useGstBill: boolean }>
@@ -613,25 +611,6 @@ const DistributorPanel = () => {
     });
   };
 
-  const handleVerifyOnlinePayment = (orderId: string) => {
-    updateOrderPaymentVerification(orderId, "verified", paymentReviewDraft[orderId] ?? "", distributorProfile.ownerName);
-    setPaymentReviewDraft((prev) => ({ ...prev, [orderId]: "" }));
-  };
-
-  const handleRejectOnlinePayment = (orderId: string) => {
-    const note = (paymentReviewDraft[orderId] ?? "").trim();
-    if (!note) {
-      toast({
-        title: "Reason required",
-        description: "Add reject reason before rejecting online payment.",
-        variant: "destructive",
-      });
-      return;
-    }
-    updateOrderPaymentVerification(orderId, "rejected", note, distributorProfile.ownerName);
-    setPaymentReviewDraft((prev) => ({ ...prev, [orderId]: "" }));
-  };
-
   const deleteAccessDialog = (
     <Dialog open={isDeleteAccessOpen} onOpenChange={(open) => (open ? setIsDeleteAccessOpen(true) : closeDeleteAccessDialog())}>
       <DialogContent className="max-w-md">
@@ -983,7 +962,7 @@ const DistributorPanel = () => {
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Orders</CardTitle>
-          <CardDescription>Shopkeeper orders with payment mode and online verification controls.</CardDescription>
+          <CardDescription>Shopkeeper orders with payment mode and bill actions.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-4 grid gap-3 md:grid-cols-3">
@@ -1013,7 +992,6 @@ const DistributorPanel = () => {
                   <TableHead>Status</TableHead>
                   <TableHead>Approve</TableHead>
                   <TableHead>Payment</TableHead>
-                  <TableHead>Verify Payment</TableHead>
                   <TableHead>Bill</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1058,29 +1036,6 @@ const DistributorPanel = () => {
                       {order.paymentVerificationNote ? (
                         <div className="mt-1 text-[11px] text-muted-foreground">{order.paymentVerificationNote}</div>
                       ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {order.paymentMethod === "online" ? (
-                        <div className="space-y-2">
-                          <Input
-                            value={paymentReviewDraft[order.id] ?? ""}
-                            onChange={(event) =>
-                              setPaymentReviewDraft((prev) => ({ ...prev, [order.id]: event.target.value }))
-                            }
-                            placeholder="verify note / reject reason"
-                          />
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline" onClick={() => handleVerifyOnlinePayment(order.id)}>
-                              Verify
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => handleRejectOnlinePayment(order.id)}>
-                              Reject
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Cash payment</span>
-                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
