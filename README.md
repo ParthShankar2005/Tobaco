@@ -3,7 +3,6 @@
 Single website with:
 - Distributor/Admin dashboard
 - Shopkeeper order panel
-- Order Desk for bill review and WhatsApp confirmation
 
 Data now syncs across devices using Supabase.
 
