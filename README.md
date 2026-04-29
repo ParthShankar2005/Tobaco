@@ -44,14 +44,25 @@ You can also override with env vars:
 
 ## 4) Razorpay setup (online payment)
 
-Add env vars for checkout:
+Frontend env vars:
 
 ```env
 VITE_RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxx
-VITE_RAZORPAY_ORDER_ENDPOINT=https://your-server.example.com/api/razorpay/order
+VITE_RAZORPAY_ORDER_ENDPOINT=https://uddkkxikzzeuwjgwgjba.supabase.co/functions/v1/razorpay-order
 ```
 
-`VITE_RAZORPAY_ORDER_ENDPOINT` must create a Razorpay Order server-side (using Key Secret) and return JSON with `orderId` (or `id`).
+Server-side order creator is included at:
+- `supabase/functions/razorpay-order/index.ts`
+
+Deploy function and set secrets (do not put secret in frontend):
+
+```bash
+supabase functions deploy razorpay-order --project-ref uddkkxikzzeuwjgwgjba
+supabase secrets set RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxx --project-ref uddkkxikzzeuwjgwgjba
+supabase secrets set RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxxxxxx --project-ref uddkkxikzzeuwjgwgjba
+```
+
+The function returns `orderId`/`id` for checkout.
 
 ## Notes
 

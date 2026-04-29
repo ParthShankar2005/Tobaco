@@ -1,3 +1,5 @@
+import { supabaseAnonKey, supabaseUrl } from "./supabase";
+
 declare global {
   interface Window {
     Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
@@ -60,7 +62,8 @@ const CHECKOUT_SCRIPT_URL = "https://checkout.razorpay.com/v1/checkout.js";
 
 export const razorpayKeyId = (import.meta.env.VITE_RAZORPAY_KEY_ID as string | undefined)?.trim() || "";
 export const razorpayOrderEndpoint =
-  (import.meta.env.VITE_RAZORPAY_ORDER_ENDPOINT as string | undefined)?.trim() || "";
+  (import.meta.env.VITE_RAZORPAY_ORDER_ENDPOINT as string | undefined)?.trim() ||
+  `${supabaseUrl}/functions/v1/razorpay-order`;
 
 export const loadRazorpayCheckout = async () => {
   if (typeof window === "undefined") return false;
@@ -101,7 +104,11 @@ export const createRazorpayOrder = async (input: {
 
   const response = await fetch(razorpayOrderEndpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
     body: JSON.stringify({
       amount: input.amountInPaise,
       currency: "INR",
@@ -112,7 +119,16 @@ export const createRazorpayOrder = async (input: {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || "Unable to create Razorpay order.");
+    let detail = text;
+    try {
+      const parsed = text ? (JSON.parse(text) as { error?: string; message?: string }) : null;
+      detail = parsed?.error || parsed?.message || text;
+    } catch {
+      // Keep raw text as detail when payload is not JSON.
+    }
+    throw new Error(
+      `Unable to create Razorpay order (${response.status}). Endpoint: ${razorpayOrderEndpoint}. ${detail || ""}`.trim(),
+    );
   }
 
   const data = (await response.json()) as
@@ -167,4 +183,3 @@ export const openRazorpayCheckout = (input: {
   instance.open();
   return true;
 };
-
