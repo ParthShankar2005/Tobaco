@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { AuthRole, getDefaultRouteForRole, useRoleAuth } from "@/auth/roleAuth";
@@ -28,11 +28,34 @@ const RoleLoginPage = ({ role }: RoleLoginPageProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const { login, session, shopkeeperAccounts } = useRoleAuth();
+  const { login, logout, session, shopkeeperAccounts } = useRoleAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  if (session) return <Navigate to={getDefaultRouteForRole(session.role)} replace />;
+  useEffect(() => {
+    if (!session || session.role === role) return;
+    // Prevent cross-role back/forward redirect issues by clearing previous role session.
+    logout();
+  }, [session, role, logout]);
+
+  if (session && session.role === role) return <Navigate to={getDefaultRouteForRole(session.role)} replace />;
+
+  if (session && session.role !== role) {
+    return (
+      <div className="min-h-screen bg-background px-4 py-12">
+        <div className="mx-auto max-w-md">
+          <Card>
+            <CardHeader className="gradient-burgundy text-primary-foreground rounded-t-xl">
+              <CardTitle className="text-2xl">Switching Session</CardTitle>
+              <CardDescription className="text-primary-foreground/85">
+                Closing current session and opening requested login panel.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   const devCredential = useMemo(() => {
     if (role === "admin") {
