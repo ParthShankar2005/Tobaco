@@ -1,0 +1,49 @@
+# TOBACO Distributor + Shopkeeper Platform
+
+Single website with:
+- Distributor/Admin dashboard
+- Shopkeeper order panel
+- Order Desk for bill review and WhatsApp confirmation
+
+Data now syncs across devices using Supabase.
+
+## 1) Install and run
+
+```bash
+npm install
+npm run dev
+```
+
+Or use Windows launcher:
+
+```bat
+run.bat
+```
+
+## 2) Supabase setup (required for multi-device sync)
+
+1. Open Supabase SQL Editor.
+2. Run: `supabase/schema.sql`
+3. Start the app.
+
+The frontend is already configured to use:
+- `https://uddkkxikzzeuwjgwgjba.supabase.co`
+- publishable key (anon/public)
+
+You can also override with env vars:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+## 3) Default login (dev)
+
+- Distributor/Admin:
+  - username: `distributor`
+  - password: `dist@123`
+- Shopkeeper:
+  - username: `shopkeeper`
+  - password: `shop@123`
+
+## Notes
+
+- This project currently uses simple username/password rows for quick setup.
+- For production security, move authentication to Supabase Auth and tighten RLS policies.

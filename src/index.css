@@ -1,0 +1,197 @@
+@import url('https://fonts.googleapis.com/css2?family=Alegreya:wght@600;700&family=Public+Sans:wght@400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 32 22% 94%;
+    --foreground: 18 34% 17%;
+
+    --card: 34 28% 97%;
+    --card-foreground: 18 34% 17%;
+
+    --popover: 30 30% 98%;
+    --popover-foreground: 340 40% 15%;
+
+    --primary: 8 46% 28%;
+    --primary-foreground: 35 45% 94%;
+
+    --secondary: 34 52% 45%;
+    --secondary-foreground: 18 34% 17%;
+
+    --muted: 34 20% 88%;
+    --muted-foreground: 20 20% 35%;
+
+    --accent: 32 66% 52%;
+    --accent-foreground: 18 34% 17%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 30 26% 80%;
+    --input: 30 26% 80%;
+    --ring: 8 46% 28%;
+
+    --radius: 0.75rem;
+
+    /* Custom colors */
+    --burgundy: 8 46% 28%;
+    --burgundy-light: 10 44% 38%;
+    --burgundy-dark: 8 52% 20%;
+    --gold: 34 66% 52%;
+    --gold-light: 34 74% 66%;
+    --gold-dark: 34 60% 40%;
+    --cream: 32 22% 94%;
+    --cream-dark: 32 18% 88%;
+
+    /* Gradients */
+    --gradient-burgundy: linear-gradient(135deg, hsl(8 46% 28%), hsl(8 52% 20%));
+    --gradient-gold: linear-gradient(135deg, hsl(34 66% 52%), hsl(34 60% 40%));
+    --gradient-hero: linear-gradient(180deg, hsl(8 46% 28%) 0%, hsl(10 44% 35%) 50%, hsl(8 52% 20%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(34 28% 97%), hsl(32 22% 92%));
+
+    /* Shadows */
+    --shadow-card: 0 6px 24px -8px hsl(8 46% 28% / 0.2);
+    --shadow-button: 0 4px 16px -4px hsl(8 46% 28% / 0.28);
+    --shadow-gold: 0 4px 20px -4px hsl(34 66% 52% / 0.42);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 340 40% 8%;
+    --foreground: 30 25% 96%;
+
+    --card: 340 35% 12%;
+    --card-foreground: 30 25% 96%;
+
+    --popover: 340 35% 12%;
+    --popover-foreground: 30 25% 96%;
+
+    --primary: 40 70% 55%;
+    --primary-foreground: 340 40% 15%;
+
+    --secondary: 340 45% 25%;
+    --secondary-foreground: 30 25% 96%;
+
+    --muted: 340 30% 18%;
+    --muted-foreground: 30 20% 70%;
+
+    --accent: 40 70% 55%;
+    --accent-foreground: 340 40% 15%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 340 30% 20%;
+    --input: 340 30% 20%;
+    --ring: 40 70% 55%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Public Sans', 'Segoe UI', sans-serif;
+    background-image:
+      radial-gradient(circle at 10% 8%, hsl(34 66% 52% / 0.12), transparent 40%),
+      radial-gradient(circle at 85% 14%, hsl(8 46% 28% / 0.12), transparent 36%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Alegreya', Georgia, serif;
+  }
+}
+
+@layer utilities {
+  .gradient-burgundy {
+    background: var(--gradient-burgundy);
+  }
+
+  .gradient-gold {
+    background: var(--gradient-gold);
+  }
+
+  .gradient-hero {
+    background: var(--gradient-hero);
+  }
+
+  .gradient-card {
+    background: var(--gradient-card);
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-button {
+    box-shadow: var(--shadow-button);
+  }
+
+  .shadow-gold {
+    box-shadow: var(--shadow-gold);
+  }
+
+  .text-gold {
+    color: hsl(var(--gold));
+  }
+
+  .text-burgundy {
+    color: hsl(var(--burgundy));
+  }
+
+  .bg-burgundy {
+    background-color: hsl(var(--burgundy));
+  }
+
+  .bg-gold {
+    background-color: hsl(var(--gold));
+  }
+
+  .bg-cream {
+    background-color: hsl(var(--cream));
+  }
+
+  .border-gold {
+    border-color: hsl(var(--gold));
+  }
+
+  /* Print styles */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+    
+    .print-only {
+      display: block !important;
+    }
+    
+    body {
+      background: white !important;
+      color: black !important;
+    }
+  }
+}
