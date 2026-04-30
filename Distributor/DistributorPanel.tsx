@@ -284,6 +284,7 @@ const DistributorPanel = () => {
       amount: Number(item.amount.toFixed(2)),
     }));
   }, [ordersInSelectedRange, reportDays]);
+  const trendTickInterval = reportDays === 28 ? 1 : 0;
 
   const todayShopOrderSheet = useMemo(() => {
     const todayKey = formatDateKey(new Date());
@@ -715,9 +716,16 @@ const DistributorPanel = () => {
                 config={{ amount: { label: "Sales", color: "hsl(var(--primary))" } }}
                 className="mt-3 h-[240px] w-full"
               >
-                <BarChart data={distributorSalesTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <BarChart data={distributorSalesTrend} margin={{ top: 8, right: 12, left: 0, bottom: 6 }}>
                   <CartesianGrid vertical={false} />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    interval={trendTickInterval}
+                    minTickGap={reportDays === 28 ? 16 : 8}
+                    tickMargin={8}
+                  />
                   <YAxis
                     tickLine={false}
                     axisLine={false}
