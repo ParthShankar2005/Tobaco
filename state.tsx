@@ -176,6 +176,7 @@ const ITEM_NUMBER_MAX = 9999;
 const REMOTE_SYNC_INTERVAL_MS = 3000;
 const ORDER_RETENTION_DAYS = 30;
 const BILL_RETENTION_DAYS = 28;
+const ORDER_ID_REMOTE_LOOKUP_TIMEOUT_MS = 400;
 const REMOTE_RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 let hasLoggedRemoteError = false;
@@ -1112,21 +1113,29 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     let nextOrderId = getNextOrderId(state.orders);
     if (isSupabaseConfigured) {
-      const { data: remoteOrderRows, error: remoteOrderError } = await supabase
-        .from("orders")
-        .select("id")
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (remoteOrderError) {
-        return {
-          ok: false,
-          message: `Unable to fetch latest order number: ${remoteOrderError.message}`,
-        };
+      try {
+        const remoteOrderLookup = await Promise.race([
+          supabase.from("orders").select("id").order("created_at", { ascending: false }).limit(300),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), ORDER_ID_REMOTE_LOOKUP_TIMEOUT_MS);
+          }),
+        ]);
+
+        if (remoteOrderLookup && !remoteOrderLookup.error) {
+          const mergedIds = [
+            ...state.orders.map((order) => order.id),
+            ...(remoteOrderLookup.data ?? []).map((row) => String(row.id ?? "")),
+          ];
+          nextOrderId = getNextOrderIdFromIds(mergedIds);
+        } else if (remoteOrderLookup?.error) {
+          logRemoteError(remoteOrderLookup.error);
+        }
+      } catch (error) {
+        logRemoteError(error);
       }
-      const mergedIds = [...state.orders.map((order) => order.id), ...(remoteOrderRows ?? []).map((row) => String(row.id ?? ""))];
-      nextOrderId = getNextOrderIdFromIds(mergedIds);
     }
 
+    const nowIso = new Date().toISOString();
     const order: OrderRecord = {
       id: nextOrderId,
       shopId: shop.id,
@@ -1141,9 +1150,9 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       paymentVerificationNote: "",
       paymentVerifiedAt: undefined,
       paymentVerifiedBy: undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       status: "pending",
-      statusUpdatedAt: new Date().toISOString(),
+      statusUpdatedAt: nowIso,
       statusUpdatedBy: "shopkeeper",
       cancelledBy: undefined,
       billDeletedAt: undefined,
@@ -1152,82 +1161,90 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       note: note.trim(),
     };
 
+    setState((prev) => ({ ...prev, orders: [order, ...prev.orders] }));
+
     if (isSupabaseConfigured) {
-      const productRows = state.products.map(productToRow);
-      const productIdMap = new Map<string, string>();
-      for (const product of state.products) {
-        productIdMap.set(product.id, product.id);
-      }
+      const selectedProductRows = selected.map(({ product }) => productToRow(product));
+      const shopRow = shopToRow(shop);
 
-      const { error: productSeedError } = await supabase.from("products").upsert(productRows, { onConflict: "id" });
-      if (productSeedError) {
-        const { data: remoteProducts, error: remoteProductsError } = await supabase
-          .from("products")
-          .select("id,item_number,name");
-        if (remoteProductsError) {
-          return {
-            ok: false,
-            message: `Unable to sync items for order: ${productSeedError.message}`,
-          };
-        }
-
-        for (const { product } of selected) {
-          const match = (remoteProducts ?? []).find(
-            (remote) =>
-              remote.id === product.id ||
-              String(remote.item_number ?? "") === product.itemNumber ||
-              String(remote.name ?? "").toLowerCase() === product.name.toLowerCase(),
-          );
-          if (!match?.id) {
-            return {
-              ok: false,
-              message: `Item sync mismatch for "${product.name}". Refresh and try again.`,
-            };
+      const syncOrderToCloud = async (targetOrder: OrderRecord): Promise<{ ok: true } | { ok: false; error: unknown }> => {
+        try {
+          if (selectedProductRows.length > 0) {
+            const { error: seedProductsError } = await supabase.from("products").upsert(selectedProductRows, {
+              onConflict: "id",
+            });
+            if (seedProductsError) return { ok: false, error: seedProductsError };
           }
-          productIdMap.set(product.id, match.id);
+
+          const { error: seedShopError } = await supabase.from("shops").upsert(shopRow, { onConflict: "id" });
+          if (seedShopError) return { ok: false, error: seedShopError };
+
+          const { error: orderInsertError } = await supabase.from("orders").insert(orderToRow(targetOrder));
+          if (orderInsertError) return { ok: false, error: orderInsertError };
+
+          const rows = orderItemRows(targetOrder);
+          if (rows.length > 0) {
+            const { error: itemInsertError } = await supabase.from("order_items").insert(rows);
+            if (itemInsertError) return { ok: false, error: itemInsertError };
+          }
+
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
         }
-      }
+      };
 
-      const { error: shopSeedError } = await supabase.from("shops").upsert(shopToRow(shop), { onConflict: "id" });
-      if (shopSeedError) {
-        return {
-          ok: false,
-          message: `Unable to sync shop for order: ${shopSeedError.message}`,
-        };
-      }
+      void (async () => {
+        const syncResult = await syncOrderToCloud(order);
+        if (syncResult.ok) return;
 
-      const { error: orderError } = await supabase.from("orders").upsert(orderToRow(order), { onConflict: "id" });
-      if (orderError) {
-        return {
-          ok: false,
-          message: `Unable to save order: ${orderError.message}`,
-        };
-      }
+        const errorMessage =
+          typeof syncResult.error === "object" && syncResult.error !== null && "message" in syncResult.error
+            ? String((syncResult.error as { message?: unknown }).message ?? "")
+            : String(syncResult.error ?? "");
+        const errorCode =
+          typeof syncResult.error === "object" && syncResult.error !== null && "code" in syncResult.error
+            ? String((syncResult.error as { code?: unknown }).code ?? "")
+            : "";
+        const isDuplicateOrderId =
+          errorCode === "23505" || /duplicate|already exists|unique|23505/i.test(errorMessage);
 
-      const { error: cleanupError } = await supabase.from("order_items").delete().eq("order_id", order.id);
-      if (cleanupError) {
-        return {
-          ok: false,
-          message: `Unable to prepare order items: ${cleanupError.message}`,
-        };
-      }
-
-      const rows = orderItemRows(order).map((row) => ({
-        ...row,
-        product_id: productIdMap.get(row.product_id) ?? row.product_id,
-      }));
-      if (rows.length > 0) {
-        const { error: itemError } = await supabase.from("order_items").insert(rows);
-        if (itemError) {
-          return {
-            ok: false,
-            message: `Unable to save order items: ${itemError.message}`,
-          };
+        if (!isDuplicateOrderId) {
+          logRemoteError(syncResult.error);
+          return;
         }
-      }
+
+        try {
+          const { data: remoteOrderRows, error: remoteOrderError } = await supabase
+            .from("orders")
+            .select("id")
+            .order("created_at", { ascending: false })
+            .limit(500);
+          if (remoteOrderError) {
+            logRemoteError(remoteOrderError);
+            return;
+          }
+
+          const mergedIds = [
+            ...stateRef.current.orders.map((entry) => entry.id),
+            ...(remoteOrderRows ?? []).map((row) => String(row.id ?? "")),
+          ];
+          const retryOrderId = getNextOrderIdFromIds(mergedIds);
+          const retryOrder: OrderRecord = { ...order, id: retryOrderId };
+
+          setState((prev) => ({
+            ...prev,
+            orders: prev.orders.map((entry) => (entry.id === order.id ? retryOrder : entry)),
+          }));
+
+          const retrySync = await syncOrderToCloud(retryOrder);
+          if (!retrySync.ok) logRemoteError(retrySync.error);
+        } catch (error) {
+          logRemoteError(error);
+        }
+      })();
     }
 
-    setState((prev) => ({ ...prev, orders: [order, ...prev.orders] }));
     return { ok: true, message: "Order created successfully.", order };
   };
 
