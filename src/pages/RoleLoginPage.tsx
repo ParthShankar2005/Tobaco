@@ -28,7 +28,7 @@ const RoleLoginPage = ({ role }: RoleLoginPageProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const { login, logout, session, shopkeeperAccounts } = useRoleAuth();
+  const { login, logout, session, shopkeeperAccounts, getAdminLoginCredential } = useRoleAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -59,12 +59,12 @@ const RoleLoginPage = ({ role }: RoleLoginPageProps) => {
 
   const devCredential = useMemo(() => {
     if (role === "admin") {
-      return { username: "distributor", password: "dist@123" };
+      return getAdminLoginCredential();
     }
     const activeShopkeeper = shopkeeperAccounts.find((item) => item.active);
     if (!activeShopkeeper) return null;
     return { username: activeShopkeeper.username, password: activeShopkeeper.password };
-  }, [role, shopkeeperAccounts]);
+  }, [role, shopkeeperAccounts, getAdminLoginCredential]);
 
   const doLogin = (user: string, pass: string) => {
     const result = login(role, user, pass);

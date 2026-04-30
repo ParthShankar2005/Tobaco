@@ -107,6 +107,7 @@ interface RoleAuthContextValue {
   session: AuthSession | null;
   shopkeeperAccounts: ShopkeeperAccount[];
   getDistributorProfile: () => UserProfile;
+  getAdminLoginCredential: () => { username: string; password: string };
   getCurrentUserProfile: () => UserProfile;
   getProfileForUser: (role: AuthRole, username: string) => UserProfile;
   getShopkeeperAccount: (username: string) => ShopkeeperAccount | undefined;
@@ -145,7 +146,7 @@ interface ShopkeeperAccountRow {
 }
 
 interface UserProfileRow {
-  role: AuthRole;
+  role: string;
   username: string;
   business_name: string;
   owner_name: string;
@@ -175,6 +176,26 @@ const ADMIN_AUTH_ROW_ID = "admin";
 let hasLoggedAuthRemoteError = false;
 
 const normalizeUsername = (value: string) => value.trim().toLowerCase();
+const normalizeRole = (value: unknown): AuthRole | null => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "admin" ||
+    normalized === "administrator" ||
+    normalized === "distributor" ||
+    normalized === "distributer" ||
+    normalized === "distributore" ||
+    normalized === "distibutor" ||
+    normalized === "distrubutor"
+  ) {
+    return "admin";
+  }
+  if (normalized === "shopkeeper" || normalized === "shop_keeper" || normalized === "retailer" || normalized === "shop") {
+    return "shopkeeper";
+  }
+  return null;
+};
 
 const defaultBillPrintSettings = (): BillPrintSettings => ({
   billTitle: "TOBACO",
@@ -232,8 +253,8 @@ const defaultShopkeeperProfile = (displayName = ""): UserProfile => ({
 
 const profileStorageKey = (role: AuthRole, username: string) => `${role}:${normalizeUsername(username)}`;
 
-const defaultRouteForRole = (role: AuthRole) => {
-  if (role === "admin") return "/distributor";
+const defaultRouteForRole = (role: AuthRole | string) => {
+  if (normalizeRole(role) === "admin") return "/distributor";
   return "/shopkeeper";
 };
 
@@ -243,9 +264,17 @@ const loadSession = (): AuthSession | null => {
     const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<AuthSession>;
-    if (!parsed.role || !parsed.username || !parsed.displayName || !parsed.loginAt) return null;
+    const normalizedRole = normalizeRole(parsed.role);
+    if (
+      !normalizedRole ||
+      typeof parsed.username !== "string" ||
+      typeof parsed.displayName !== "string" ||
+      typeof parsed.loginAt !== "string"
+    ) {
+      return null;
+    }
     return {
-      role: parsed.role,
+      role: normalizedRole,
       username: parsed.username,
       displayName: parsed.displayName,
       shopId: parsed.shopId,
@@ -370,7 +399,9 @@ const profileFromRow = (row: UserProfileRow): UserProfile => ({
 
 const rowsToProfiles = (rows: UserProfileRow[]) =>
   rows.reduce<Record<string, UserProfile>>((acc, row) => {
-    acc[profileStorageKey(row.role, row.username)] = profileFromRow(row);
+    const normalizedRole = normalizeRole(row.role);
+    if (!normalizedRole) return acc;
+    acc[profileStorageKey(normalizedRole, row.username)] = profileFromRow(row);
     return acc;
   }, {});
 
@@ -378,8 +409,9 @@ const profilesToRows = (profiles: Record<string, UserProfile>) =>
   Object.entries(profiles)
     .map(([key, profile]) => {
       const [role, username] = key.split(":");
-      if ((role !== "admin" && role !== "shopkeeper") || !username) return null;
-      return profileToRow(role as AuthRole, username, profile);
+      const normalizedRole = normalizeRole(role);
+      if (!normalizedRole || !username) return null;
+      return profileToRow(normalizedRole, username, profile);
     })
     .filter((row): row is UserProfileRow => row !== null);
 
@@ -511,7 +543,8 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
       const rows = pendingEntries
         .map(([key]) => {
           const [role, username] = key.split(":");
-          if ((role !== "admin" && role !== "shopkeeper") || !username) {
+          const normalizedRole = normalizeRole(role);
+          if (!normalizedRole || !username) {
             delete pendingProfileSyncRef.current[key];
             return null;
           }
@@ -523,7 +556,7 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
           }
 
           pendingProfileSyncRef.current[key] = profile.updatedAt;
-          return profileToRow(role as AuthRole, username, profile);
+          return profileToRow(normalizedRole, username, profile);
         })
         .filter((row): row is UserProfileRow => row !== null);
 
@@ -652,6 +685,7 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const getDistributorProfile = (): UserProfile => getProfileForUser("admin", adminAuth.username);
+  const getAdminLoginCredential = () => ({ username: adminAuth.username, password: adminAuth.password });
 
   const verifyAdminAccessKey = (accessKey: string): VerifyAccessKeyResult => {
     if (!session || session.role !== "admin") {
@@ -988,6 +1022,7 @@ export const RoleAuthProvider = ({ children }: { children: ReactNode }) => {
       session,
       shopkeeperAccounts,
       getDistributorProfile,
+      getAdminLoginCredential,
       getCurrentUserProfile,
       getProfileForUser,
       getShopkeeperAccount,

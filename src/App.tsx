@@ -24,6 +24,8 @@ const App = () => (
           <TobacoProvider>
             <Routes>
               <Route path="/" element={<PortalEntryPage />} />
+              <Route path="/distributor-login" element={<Navigate to="/admin-login" replace />} />
+              <Route path="/distributer-login" element={<Navigate to="/admin-login" replace />} />
               <Route path="/admin-login" element={<RoleLoginPage role="admin" />} />
               <Route path="/shopkeeper-login" element={<RoleLoginPage role="shopkeeper" />} />
 

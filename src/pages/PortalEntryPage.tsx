@@ -61,7 +61,7 @@ const PortalEntryPage = () => {
                     ))}
                   </ul>
                   <Button asChild variant="burgundy" className="w-full">
-                    <Link to="/admin-login">Open Distributor Login</Link>
+                    <Link to="/distributor-login">Open Distributor Login</Link>
                   </Button>
                 </CardContent>
               </Card>
@@ -127,8 +127,8 @@ const PortalEntryPage = () => {
                   </div>
                   <div className="rounded-md border bg-muted/40 p-3">
                     <div className="font-semibold text-foreground">Distributor Login</div>
-                    <Link to="/admin-login" className="text-primary underline underline-offset-2">
-                      /admin-login
+                    <Link to="/distributor-login" className="text-primary underline underline-offset-2">
+                      /distributor-login
                     </Link>
                   </div>
                   <div className="rounded-md border bg-muted/40 p-3">
