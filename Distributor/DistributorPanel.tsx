@@ -45,6 +45,7 @@ const ITEM_NUMBER_START = 1;
 const ITEM_NUMBER_MAX = 9999;
 const DEFAULT_REPORT_DAYS = 28;
 const BILL_AUTO_DELETE_DAYS = 28;
+const BILL_DELETE_LOCK_DAYS = 2;
 const REPORT_RANGE_OPTIONS = [1, 7, 14, 28] as const;
 
 const formatDateKey = (value: Date) =>
@@ -106,6 +107,8 @@ const DistributorPanel = () => {
     getRuleForShopProduct,
     upsertPriceRule,
     updateOrderStatus,
+    deleteOrder,
+    deleteBill,
     clearAllOrders,
   } = useTobaco();
 
@@ -124,6 +127,7 @@ const DistributorPanel = () => {
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
   const [isAddShopOpen, setIsAddShopOpen] = useState(false);
+  const [isCreateShopkeeperDialogOpen, setIsCreateShopkeeperDialogOpen] = useState(false);
   const [isDeleteAccessOpen, setIsDeleteAccessOpen] = useState(false);
   const [deleteAccessKey, setDeleteAccessKey] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -394,6 +398,17 @@ const DistributorPanel = () => {
     [orders],
   );
 
+  const deletableBillIds = useMemo(
+    () =>
+      new Set(
+        visibleAcceptedBills
+          .filter((order) => !isWithinRecentDays(order.createdAt, BILL_DELETE_LOCK_DAYS))
+          .map((order) => order.id),
+      ),
+    [visibleAcceptedBills],
+  );
+  const deletableBillCount = deletableBillIds.size;
+
   const handleItemPhotoChange =
     (mode: "add" | "edit") => (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -580,6 +595,8 @@ const DistributorPanel = () => {
       return;
     }
     setShopkeeperLoginForm({ username: "", password: "", displayName: "", useGstBill: true });
+    setIsCreateShopkeeperDialogOpen(false);
+    toast({ title: "Shopkeeper ID created", description: result.message });
   };
 
   const handleResetShopkeeperPassword = (accountId: string) => {
@@ -608,6 +625,24 @@ const DistributorPanel = () => {
   const handleDeleteUser = (accountId: string) => {
     const result = deleteShopkeeperAccount(accountId);
     if (!result.ok) toast({ title: "Delete failed", description: result.message, variant: "destructive" });
+  };
+
+  const handleDeleteCancelledOrder = async (orderId: string) => {
+    const result = await deleteOrder(orderId);
+    if (!result.ok) {
+      toast({ title: "Delete failed", description: result.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Order deleted", description: result.message });
+  };
+
+  const handleDeleteBill = async (orderId: string) => {
+    const result = await deleteBill(orderId);
+    if (!result.ok) {
+      toast({ title: "Delete bill failed", description: result.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Bill deleted", description: result.message });
   };
 
   const handleClearAllBills = async () => {
@@ -821,34 +856,52 @@ const DistributorPanel = () => {
       <Card>
         <CardHeader><CardTitle className="text-xl">Users Management</CardTitle><CardDescription>Create, edit, delete, reset password for shopkeeper users.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2"><Label>Select Shop</Label><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedShopForLogin} onChange={(event) => setSelectedShopForLogin(event.target.value)}>{shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.shopName} - {shop.area}</option>)}</select></div>
-            <div className="space-y-2"><Label>Display Name</Label><Input value={shopkeeperLoginForm.displayName} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, displayName: event.target.value }))} /></div>
-            <div className="space-y-2"><Label>Username</Label><Input value={shopkeeperLoginForm.username} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, username: event.target.value }))} /></div>
-            <div className="space-y-2"><Label>Password</Label><Input type="password" value={shopkeeperLoginForm.password} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, password: event.target.value }))} /></div>
-            <div className="space-y-2">
-              <Label>GST Bill For This Shop?</Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={shopkeeperLoginForm.useGstBill ? "gold" : "outline"}
-                  onClick={() => setShopkeeperLoginForm((prev) => ({ ...prev, useGstBill: true }))}
-                >
-                  GST Bill
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={!shopkeeperLoginForm.useGstBill ? "gold" : "outline"}
-                  onClick={() => setShopkeeperLoginForm((prev) => ({ ...prev, useGstBill: false }))}
-                >
-                  No GST
-                </Button>
-              </div>
-            </div>
+          <div className="flex justify-end">
+            <Button variant="burgundy" onClick={() => setIsCreateShopkeeperDialogOpen(true)}>
+              Create Shopkeeper ID
+            </Button>
           </div>
-          <Button variant="burgundy" onClick={handleCreateShopkeeperId}>Create Shopkeeper ID</Button>
+
+          <Dialog open={isCreateShopkeeperDialogOpen} onOpenChange={setIsCreateShopkeeperDialogOpen}>
+            <DialogContent className="max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Create Shopkeeper ID</DialogTitle>
+                <DialogDescription>Fill details and create a new shopkeeper login.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2"><Label>Select Shop</Label><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedShopForLogin} onChange={(event) => setSelectedShopForLogin(event.target.value)}>{shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.shopName} - {shop.area}</option>)}</select></div>
+                <div className="space-y-2"><Label>Display Name</Label><Input value={shopkeeperLoginForm.displayName} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, displayName: event.target.value }))} /></div>
+                <div className="space-y-2"><Label>Username</Label><Input value={shopkeeperLoginForm.username} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, username: event.target.value }))} /></div>
+                <div className="space-y-2"><Label>Password</Label><Input type="password" value={shopkeeperLoginForm.password} onChange={(event) => setShopkeeperLoginForm((prev) => ({ ...prev, password: event.target.value }))} /></div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>GST Bill For This Shop?</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={shopkeeperLoginForm.useGstBill ? "gold" : "outline"}
+                      onClick={() => setShopkeeperLoginForm((prev) => ({ ...prev, useGstBill: true }))}
+                    >
+                      GST Bill
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={!shopkeeperLoginForm.useGstBill ? "gold" : "outline"}
+                      onClick={() => setShopkeeperLoginForm((prev) => ({ ...prev, useGstBill: false }))}
+                    >
+                      No GST
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsCreateShopkeeperDialogOpen(false)}>Cancel</Button>
+                <Button variant="burgundy" onClick={handleCreateShopkeeperId}>Create</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Table>
             <TableHeader><TableRow><TableHead>User</TableHead><TableHead>Display</TableHead><TableHead>Shop</TableHead><TableHead>Status</TableHead><TableHead>GST Bill</TableHead><TableHead>Owner</TableHead><TableHead>Mobile</TableHead><TableHead>Password</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
             <TableBody>
@@ -1073,6 +1126,10 @@ const DistributorPanel = () => {
                             Reject
                           </Button>
                         </div>
+                      ) : order.status === "rejected" ? (
+                        <Button size="sm" variant="destructive" onClick={() => void handleDeleteCancelledOrder(order.id)}>
+                          Delete
+                        </Button>
                       ) : (
                         "Finalized"
                       )}
@@ -1123,19 +1180,19 @@ const DistributorPanel = () => {
             <div>
               <CardTitle className="text-xl">Bills</CardTitle>
               <CardDescription>
-                Accepted bills from last {BILL_AUTO_DELETE_DAYS} days. Older bills are auto-deleted from this list.
+                Accepted bills from last {BILL_AUTO_DELETE_DAYS} days. Last {BILL_DELETE_LOCK_DAYS} days bills are protected.
               </CardDescription>
             </div>
-            <Button variant="destructive" onClick={() => void handleClearAllBills()}>
-              Delete Visible Bills
+            <Button variant="destructive" onClick={() => void handleClearAllBills()} disabled={deletableBillCount === 0}>
+              Delete Bills
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           {visibleAcceptedBills.length === 0 ? <p className="text-sm text-muted-foreground">No finalized bills in the last {BILL_AUTO_DELETE_DAYS} days.</p> : (
             <Table>
-              <TableHeader><TableRow><TableHead>Bill</TableHead><TableHead>Shop</TableHead><TableHead>Date</TableHead><TableHead>Amount</TableHead><TableHead>Download</TableHead></TableRow></TableHeader>
-              <TableBody>{visibleAcceptedBills.map((order) => <TableRow key={order.id}><TableCell>{order.id}</TableCell><TableCell>{order.shopName}</TableCell><TableCell>{formatDateTime(order.createdAt)}</TableCell><TableCell>₹{order.subtotal}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}>Print</Button><Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>Download</Button></div></TableCell></TableRow>)}</TableBody>
+              <TableHeader><TableRow><TableHead>Bill</TableHead><TableHead>Shop</TableHead><TableHead>Date</TableHead><TableHead>Amount</TableHead><TableHead>Download</TableHead><TableHead>Delete</TableHead></TableRow></TableHeader>
+              <TableBody>{visibleAcceptedBills.map((order) => <TableRow key={order.id}><TableCell>{order.id}</TableCell><TableCell>{order.shopName}</TableCell><TableCell>{formatDateTime(order.createdAt)}</TableCell><TableCell>₹{order.subtotal}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}>Print</Button><Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>Download</Button></div></TableCell><TableCell>{deletableBillIds.has(order.id) ? <Button size="sm" variant="destructive" onClick={() => void handleDeleteBill(order.id)}>Delete</Button> : <span className="text-xs text-muted-foreground">Locked ({BILL_DELETE_LOCK_DAYS}d)</span>}</TableCell></TableRow>)}</TableBody>
             </Table>
           )}
         </CardContent>

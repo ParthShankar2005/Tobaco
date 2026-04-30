@@ -63,6 +63,16 @@ interface ClearOrdersResult {
   message: string;
 }
 
+interface DeleteOrderResult {
+  ok: boolean;
+  message: string;
+}
+
+interface DeleteBillResult {
+  ok: boolean;
+  message: string;
+}
+
 interface TobacoContextValue {
   products: Product[];
   shops: ShopContact[];
@@ -84,6 +94,8 @@ interface TobacoContextValue {
     verificationNote?: string,
     verifiedBy?: string,
   ) => void;
+  deleteOrder: (orderId: string) => Promise<DeleteOrderResult>;
+  deleteBill: (orderId: string) => Promise<DeleteBillResult>;
   clearAllOrders: () => Promise<ClearOrdersResult>;
 }
 
@@ -176,6 +188,7 @@ const ITEM_NUMBER_MAX = 9999;
 const REMOTE_SYNC_INTERVAL_MS = 3000;
 const ORDER_RETENTION_DAYS = 30;
 const BILL_RETENTION_DAYS = 28;
+const BILL_DELETE_LOCK_DAYS = 2;
 const ORDER_ID_REMOTE_LOOKUP_TIMEOUT_MS = 400;
 const REMOTE_RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -259,6 +272,12 @@ const isBillWithinRetention = (createdAt: string, now = Date.now()) => {
   const timestamp = Date.parse(createdAt);
   if (!Number.isFinite(timestamp)) return false;
   return timestamp >= now - BILL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+};
+
+const isBillDeletionLocked = (createdAt: string, now = Date.now()) => {
+  const timestamp = Date.parse(createdAt);
+  if (!Number.isFinite(timestamp)) return true;
+  return timestamp >= now - BILL_DELETE_LOCK_DAYS * 24 * 60 * 60 * 1000;
 };
 
 const defaultPaymentVerificationStatus = (paymentMethod: PaymentMethod): PaymentVerificationStatus =>
@@ -1311,14 +1330,73 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const deleteOrder = async (orderId: string): Promise<DeleteOrderResult> => {
+    const target = state.orders.find((order) => order.id === orderId);
+    if (!target) return { ok: false, message: "Order not found." };
+    if (target.status !== "rejected") {
+      return { ok: false, message: "Only cancelled orders can be deleted." };
+    }
+
+    if (isSupabaseConfigured) {
+      const { error: itemError } = await supabase.from("order_items").delete().eq("order_id", orderId);
+      if (itemError) {
+        return { ok: false, message: `Unable to remove order items: ${itemError.message}` };
+      }
+      const { error: orderError } = await supabase.from("orders").delete().eq("id", orderId);
+      if (orderError) {
+        return { ok: false, message: `Unable to remove order: ${orderError.message}` };
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      orders: prev.orders.filter((order) => order.id !== orderId),
+    }));
+
+    return { ok: true, message: `${orderId} deleted.` };
+  };
+
+  const deleteBill = async (orderId: string): Promise<DeleteBillResult> => {
+    const target = state.orders.find((order) => order.id === orderId);
+    if (!target) return { ok: false, message: "Bill not found." };
+    if (target.status !== "accepted") return { ok: false, message: "Only accepted bills can be deleted." };
+    if (target.billDeletedAt) return { ok: true, message: "Bill already deleted." };
+    if (isBillDeletionLocked(target.createdAt)) {
+      return { ok: false, message: "Last 2 days bills are protected and cannot be deleted." };
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextOrder = { ...target, billDeletedAt: nowIso };
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from("orders").upsert(orderToRow(nextOrder), { onConflict: "id" });
+      if (error) {
+        return { ok: false, message: `Unable to delete bill: ${error.message}` };
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) => (order.id === orderId ? nextOrder : order)),
+    }));
+
+    return { ok: true, message: `${orderId} bill deleted.` };
+  };
+
   const clearAllOrders = async (): Promise<ClearOrdersResult> => {
     const nowIso = new Date().toISOString();
     const targetOrderIds = state.orders
-      .filter((order) => order.status === "accepted" && !order.billDeletedAt && isBillWithinRetention(order.createdAt))
+      .filter(
+        (order) =>
+          order.status === "accepted" &&
+          !order.billDeletedAt &&
+          isBillWithinRetention(order.createdAt) &&
+          !isBillDeletionLocked(order.createdAt),
+      )
       .map((order) => order.id);
 
     if (targetOrderIds.length === 0) {
-      return { ok: true, message: "No visible bills to delete." };
+      return { ok: true, message: "No deletable bills. Last 2 days bills are protected." };
     }
 
     const nextOrders = state.orders.map((order) =>
@@ -1342,7 +1420,7 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
 
     return {
       ok: true,
-      message: `${targetOrderIds.length} bill(s) deleted from bill list. Revenue/KPI backup is preserved.`,
+      message: `${targetOrderIds.length} bill(s) deleted. Last 2 days bills were kept. Revenue/KPI backup is preserved.`,
     };
   };
 
@@ -1363,6 +1441,8 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       createOrder,
       updateOrderStatus,
       updateOrderPaymentVerification,
+      deleteOrder,
+      deleteBill,
       clearAllOrders,
     }),
     [state.products, state.shops, state.priceRules, state.orders],
