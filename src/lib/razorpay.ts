@@ -120,12 +120,26 @@ export const createRazorpayOrder = async (input: {
   if (!response.ok) {
     const text = await response.text();
     let detail = text;
+    let code = "";
     try {
-      const parsed = text ? (JSON.parse(text) as { error?: string; message?: string }) : null;
+      const parsed = text
+        ? (JSON.parse(text) as { error?: string; message?: string; code?: string; details?: { error?: { description?: string } } })
+        : null;
+      code = String(parsed?.code ?? "");
       detail = parsed?.error || parsed?.message || text;
+      if (!detail && parsed?.details?.error?.description) detail = parsed.details.error.description;
     } catch {
       // Keep raw text as detail when payload is not JSON.
     }
+
+    const isMissingFunction =
+      response.status === 404 || code === "NOT_FOUND" || /function\s+was\s+not\s+found/i.test(detail || "");
+    if (isMissingFunction) {
+      throw new Error(
+        `Razorpay function missing. Deploy Supabase function 'razorpay-order' for this project, then retry. Endpoint: ${razorpayOrderEndpoint}`,
+      );
+    }
+
     throw new Error(
       `Unable to create Razorpay order (${response.status}). Endpoint: ${razorpayOrderEndpoint}. ${detail || ""}`.trim(),
     );
