@@ -16,8 +16,8 @@ import { Store } from "lucide-react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-type ShopkeeperSection = "items" | "orders";
-const validSections: ShopkeeperSection[] = ["items", "orders"];
+type ShopkeeperSection = "dashboard" | "orders" | "bills" | "sheets";
+const validSections: ShopkeeperSection[] = ["dashboard", "orders", "bills", "sheets"];
 
 const statusClassMap: Record<string, string> = {
   pending: "bg-amber-100 text-amber-800",
@@ -42,6 +42,7 @@ const formatDateTime = (date: string) =>
   });
 
 const TREND_DAYS = 7;
+const BILL_RETENTION_DAYS = 28;
 const formatDateKey = (value: Date) =>
   `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 const formatTrendLabel = (value: Date) =>
@@ -50,10 +51,22 @@ const formatTrendLabel = (value: Date) =>
     month: "short",
   });
 const compactInr = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
+const startOfDay = (value: Date) => {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+const isWithinRecentDays = (dateValue: string, days: number, now = new Date()) => {
+  const timestamp = Date.parse(dateValue);
+  if (!Number.isFinite(timestamp)) return false;
+  const cutoff = startOfDay(now);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  return timestamp >= cutoff.getTime();
+};
 
 const ShopkeeperPanel = () => {
   const { section: rawSection } = useParams();
-  const section = (rawSection ?? "items") as ShopkeeperSection;
+  const section = (rawSection ?? "dashboard") as ShopkeeperSection;
   const navigate = useNavigate();
   const { toast } = useToast();
   const { session, getDistributorProfile, getShopkeeperAccount } = useRoleAuth();
@@ -134,6 +147,73 @@ const ShopkeeperPanel = () => {
       label: item.label,
       amount: Number(item.amount.toFixed(2)),
     }));
+  }, [selectedShopOrders]);
+
+  const shopStats = useMemo(() => {
+    const accepted = selectedShopOrders.filter((order) => order.status === "accepted");
+    const pending = selectedShopOrders.filter((order) => order.status === "pending");
+    const rejected = selectedShopOrders.filter((order) => order.status === "rejected");
+    return {
+      totalOrders: selectedShopOrders.length,
+      acceptedOrders: accepted.length,
+      pendingOrders: pending.length,
+      rejectedOrders: rejected.length,
+      acceptedAmount: accepted.reduce((sum, order) => sum + order.subtotal, 0),
+    };
+  }, [selectedShopOrders]);
+
+  const visibleBills = useMemo(
+    () =>
+      selectedShopOrders.filter(
+        (order) =>
+          order.status === "accepted" &&
+          !order.billDeletedAt &&
+          isWithinRecentDays(order.createdAt, BILL_RETENTION_DAYS),
+      ),
+    [selectedShopOrders],
+  );
+
+  const orderSheetRows = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        dateKey: string;
+        dateLabel: string;
+        orderCount: number;
+        acceptedCount: number;
+        pendingCount: number;
+        cancelledCount: number;
+        qty: number;
+        orderAmount: number;
+      }
+    >();
+
+    for (const order of selectedShopOrders) {
+      const date = new Date(order.createdAt);
+      if (Number.isNaN(date.getTime())) continue;
+      const dateKey = formatDateKey(date);
+      const dateLabel = formatDateTime(order.createdAt).split(",")[0];
+      const existing = rows.get(dateKey) ?? {
+        dateKey,
+        dateLabel,
+        orderCount: 0,
+        acceptedCount: 0,
+        pendingCount: 0,
+        cancelledCount: 0,
+        qty: 0,
+        orderAmount: 0,
+      };
+
+      existing.orderCount += 1;
+      if (order.status === "accepted") existing.acceptedCount += 1;
+      if (order.status === "pending") existing.pendingCount += 1;
+      if (order.status === "rejected") existing.cancelledCount += 1;
+      existing.qty += order.items.reduce((sum, item) => sum + item.quantity, 0);
+      existing.orderAmount += Number(order.subtotal) || 0;
+      rows.set(dateKey, existing);
+    }
+
+    return Array.from(rows.values()).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [selectedShopOrders]);
 
   const distributorProfile = useMemo(() => getDistributorProfile(), [getDistributorProfile]);
@@ -313,15 +393,17 @@ const ShopkeeperPanel = () => {
     );
   }
 
-  if (rawSection === "order") return <Navigate to="/shopkeeper/items" replace />;
-  if (!validSections.includes(section)) return <Navigate to="/shopkeeper/items" replace />;
+  if (rawSection === "order" || rawSection === "items") return <Navigate to="/shopkeeper/orders" replace />;
+  if (rawSection === "bill") return <Navigate to="/shopkeeper/bills" replace />;
+  if (rawSection === "sheet") return <Navigate to="/shopkeeper/sheets" replace />;
+  if (!validSections.includes(section)) return <Navigate to="/shopkeeper/dashboard" replace />;
 
   return (
     <div className="space-y-6">
-      {section === "items" && (
+      {section === "orders" && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Items and Priced List</CardTitle>
+            <CardTitle className="text-xl">Create Order</CardTitle>
             <CardDescription>
               Distributor offers and custom rates for your shop are applied automatically.
             </CardDescription>
