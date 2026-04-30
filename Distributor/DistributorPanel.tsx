@@ -880,6 +880,14 @@ const DistributorPanel = () => {
     return (
       <div className="space-y-6">
         <Card>
+          <CardHeader><CardTitle className="text-xl">Shop-Wise Pricing</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2"><Label>Select Shop</Label><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedShopForPricing} onChange={(event) => setSelectedShopForPricing(event.target.value)}>{shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.shopName} - {shop.area}</option>)}</select></div>
+            <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Default SRP</TableHead><TableHead>Shop Price</TableHead><TableHead>Custom Price</TableHead><TableHead>Offer</TableHead><TableHead>Save</TableHead></TableRow></TableHeader><TableBody>{products.map((product) => <TableRow key={product.id}><TableCell>{product.name}</TableCell><TableCell>₹{product.srp}</TableCell><TableCell>₹{selectedShopForPricing ? resolvePrice(selectedShopForPricing, product.id, product.srp) : product.srp}</TableCell><TableCell><Input type="number" min={1} value={priceDraft[product.id] ?? ""} onChange={(event) => setPriceDraft((prev) => ({ ...prev, [product.id]: event.target.value }))} /></TableCell><TableCell><Input value={offerDraft[product.id] ?? ""} onChange={(event) => setOfferDraft((prev) => ({ ...prev, [product.id]: event.target.value }))} /></TableCell><TableCell><Button size="sm" onClick={() => handleSavePricing(product.id)}>Save</Button></TableCell></TableRow>)}</TableBody></Table>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1001,14 +1009,6 @@ const DistributorPanel = () => {
         </Dialog>
 
         {deleteAccessDialog}
-
-        <Card>
-          <CardHeader><CardTitle className="text-xl">Shop-Wise Pricing</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2"><Label>Select Shop</Label><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedShopForPricing} onChange={(event) => setSelectedShopForPricing(event.target.value)}>{shops.map((shop) => <option key={shop.id} value={shop.id}>{shop.shopName} - {shop.area}</option>)}</select></div>
-            <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Default SRP</TableHead><TableHead>Shop Price</TableHead><TableHead>Custom Price</TableHead><TableHead>Offer</TableHead><TableHead>Save</TableHead></TableRow></TableHeader><TableBody>{products.map((product) => <TableRow key={product.id}><TableCell>{product.name}</TableCell><TableCell>₹{product.srp}</TableCell><TableCell>₹{selectedShopForPricing ? resolvePrice(selectedShopForPricing, product.id, product.srp) : product.srp}</TableCell><TableCell><Input type="number" min={1} value={priceDraft[product.id] ?? ""} onChange={(event) => setPriceDraft((prev) => ({ ...prev, [product.id]: event.target.value }))} /></TableCell><TableCell><Input value={offerDraft[product.id] ?? ""} onChange={(event) => setOfferDraft((prev) => ({ ...prev, [product.id]: event.target.value }))} /></TableCell><TableCell><Button size="sm" onClick={() => handleSavePricing(product.id)}>Save</Button></TableCell></TableRow>)}</TableBody></Table>
-          </CardContent>
-        </Card>
       </div>
     );
   }

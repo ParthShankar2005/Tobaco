@@ -133,13 +133,21 @@ const TobacoLayout = () => {
 
             {session?.role === "shopkeeper" && (
               <>
-                <NavLink to="/shopkeeper/items" className={navBaseClass} activeClassName={navActiveClass}>
-                  <Package className="h-4 w-4" />
-                  Items
+                <NavLink to="/shopkeeper/dashboard" className={navBaseClass} activeClassName={navActiveClass}>
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
                 </NavLink>
                 <NavLink to="/shopkeeper/orders" className={navBaseClass} activeClassName={navActiveClass}>
                   <ReceiptText className="h-4 w-4" />
-                  My Orders
+                  Order
+                </NavLink>
+                <NavLink to="/shopkeeper/bills" className={navBaseClass} activeClassName={navActiveClass}>
+                  <ReceiptText className="h-4 w-4" />
+                  Bill
+                </NavLink>
+                <NavLink to="/shopkeeper/sheets" className={navBaseClass} activeClassName={navActiveClass}>
+                  <Database className="h-4 w-4" />
+                  Order Sheets
                 </NavLink>
               </>
             )}

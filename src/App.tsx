@@ -38,7 +38,7 @@ const App = () => (
 
               <Route element={<RequireRole allowedRoles={["shopkeeper"]} />}>
                 <Route element={<TobacoLayout />}>
-                  <Route path="/shopkeeper" element={<Navigate to="/shopkeeper/items" replace />} />
+                  <Route path="/shopkeeper" element={<Navigate to="/shopkeeper/dashboard" replace />} />
                   <Route path="/shopkeeper/:section" element={<ShopkeeperPanel />} />
                 </Route>
               </Route>

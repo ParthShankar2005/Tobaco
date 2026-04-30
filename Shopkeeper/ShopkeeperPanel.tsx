@@ -528,43 +528,10 @@ const ShopkeeperPanel = () => {
       {section === "orders" && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Store className="h-5 w-5 text-primary" />
-              Your Orders Status
-            </CardTitle>
+            <CardTitle className="text-xl">Order Status</CardTitle>
+            <CardDescription>Track pending/accepted/cancelled orders and payment verification.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 rounded-lg border p-4">
-              <div className="text-sm font-semibold">Purchased Trend (INR / Day)</div>
-              <div className="text-xs text-muted-foreground">Accepted purchases for the last 7 days.</div>
-              {purchaseTrend.some((entry) => entry.amount > 0) ? (
-                <ChartContainer
-                  config={{ amount: { label: "Purchased", color: "hsl(var(--accent))" } }}
-                  className="mt-3 h-[220px] w-full"
-                >
-                  <BarChart data={purchaseTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(value) => `₹${compactInr.format(Number(value) || 0)}`}
-                    />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          labelFormatter={(value) => `Date: ${value}`}
-                          formatter={(value) => <span className="font-semibold">₹{Number(value).toLocaleString("en-IN")}</span>}
-                        />
-                      }
-                    />
-                    <Bar dataKey="amount" fill="var(--color-amount)" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ChartContainer>
-              ) : (
-                <p className="mt-3 text-sm text-muted-foreground">No accepted purchase data yet.</p>
-              )}
-            </div>
             {selectedShopOrders.length === 0 ? (
               <p className="text-sm text-muted-foreground">No orders yet for your shop.</p>
             ) : (
@@ -574,15 +541,14 @@ const ShopkeeperPanel = () => {
                     <TableHead>Order ID</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Items</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Verify</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Bill</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Verify</TableHead>
+                    <TableHead>Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {selectedShopOrders.map((order) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-semibold">{order.id}</TableCell>
@@ -623,11 +589,142 @@ const ShopkeeperPanel = () => {
                           "-"
                         )}
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === "dashboard" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Store className="h-5 w-5 text-primary" />
+              Shop Dashboard
+            </CardTitle>
+            <CardDescription>Quick summary of your orders and accepted purchase trend.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-5">
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Total Orders</div><div className="text-xl font-bold">{shopStats.totalOrders}</div></div>
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Pending</div><div className="text-xl font-bold text-amber-700">{shopStats.pendingOrders}</div></div>
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Accepted</div><div className="text-xl font-bold text-emerald-700">{shopStats.acceptedOrders}</div></div>
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Cancelled</div><div className="text-xl font-bold text-red-700">{shopStats.rejectedOrders}</div></div>
+              <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">Accepted INR</div><div className="text-xl font-bold text-primary">₹{shopStats.acceptedAmount}</div></div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm font-semibold">Purchased Trend (INR / Day)</div>
+              <div className="text-xs text-muted-foreground">Accepted purchases for the last 7 days.</div>
+              {purchaseTrend.some((entry) => entry.amount > 0) ? (
+                <ChartContainer
+                  config={{ amount: { label: "Purchased", color: "hsl(var(--accent))" } }}
+                  className="mt-3 h-[220px] w-full"
+                >
+                  <BarChart data={purchaseTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(value) => `₹${compactInr.format(Number(value) || 0)}`}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(value) => `Date: ${value}`}
+                          formatter={(value) => <span className="font-semibold">₹{Number(value).toLocaleString("en-IN")}</span>}
+                        />
+                      }
+                    />
+                    <Bar dataKey="amount" fill="var(--color-amount)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">No accepted purchase data yet.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {section === "bills" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Bills</CardTitle>
+            <CardDescription>
+              Accepted bills from last {BILL_RETENTION_DAYS} days.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {visibleBills.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No bills in the last {BILL_RETENTION_DAYS} days.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Bill ID</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Download</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleBills.map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="font-semibold">{order.id}</TableCell>
+                      <TableCell>{formatDateTime(order.createdAt)}</TableCell>
+                      <TableCell>₹{order.subtotal}</TableCell>
+                      <TableCell className="uppercase">{order.paymentMethod}</TableCell>
                       <TableCell>
                         <Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>
                           Download
                         </Button>
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === "sheets" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Order Sheets</CardTitle>
+            <CardDescription>Daily order summary for your shop.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {orderSheetRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No orders yet for your shop.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Orders</TableHead>
+                    <TableHead>Accepted</TableHead>
+                    <TableHead>Pending</TableHead>
+                    <TableHead>Cancelled</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Order INR</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orderSheetRows.map((row) => (
+                    <TableRow key={row.dateKey}>
+                      <TableCell className="font-semibold">{row.dateLabel}</TableCell>
+                      <TableCell>{row.orderCount}</TableCell>
+                      <TableCell>{row.acceptedCount}</TableCell>
+                      <TableCell>{row.pendingCount}</TableCell>
+                      <TableCell>{row.cancelledCount}</TableCell>
+                      <TableCell>{row.qty}</TableCell>
+                      <TableCell>₹{row.orderAmount.toLocaleString("en-IN")}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
