@@ -165,11 +165,17 @@ interface OrderNotePayloadV2 extends OrderNotePayloadV1 {
   cancelledBy?: OrderCancellationActor;
 }
 
+interface OrderNotePayloadV3 extends OrderNotePayloadV2 {
+  v: 3;
+  billDeletedAt?: string;
+}
+
 const STORAGE_KEY = "tobaco-platform-v1";
 const ITEM_NUMBER_START = 1;
 const ITEM_NUMBER_MAX = 9999;
 const REMOTE_SYNC_INTERVAL_MS = 3000;
 const ORDER_RETENTION_DAYS = 30;
+const BILL_RETENTION_DAYS = 28;
 const REMOTE_RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 let hasLoggedRemoteError = false;
@@ -248,6 +254,12 @@ const isOrderWithinRetention = (createdAt: string, now = Date.now()) => {
 const pruneOrdersByRetention = (orders: OrderRecord[], now = Date.now()) =>
   orders.filter((order) => isOrderWithinRetention(order.createdAt, now));
 
+const isBillWithinRetention = (createdAt: string, now = Date.now()) => {
+  const timestamp = Date.parse(createdAt);
+  if (!Number.isFinite(timestamp)) return false;
+  return timestamp >= now - BILL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+};
+
 const defaultPaymentVerificationStatus = (paymentMethod: PaymentMethod): PaymentVerificationStatus =>
   paymentMethod === "online" ? "pending" : "cash";
 
@@ -269,14 +281,15 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
     statusUpdatedAt: undefined as string | undefined,
     statusUpdatedBy: undefined as OrderStatusActor | undefined,
     cancelledBy: undefined as OrderCancellationActor | undefined,
+    billDeletedAt: undefined as string | undefined,
   };
 
   if (!raw) return fallback;
 
   try {
-    const parsed = JSON.parse(raw) as Partial<OrderNotePayloadV1 | OrderNotePayloadV2>;
+    const parsed = JSON.parse(raw) as Partial<OrderNotePayloadV1 | OrderNotePayloadV2 | OrderNotePayloadV3>;
     const version = Number(parsed.v ?? 1);
-    if (version !== 1 && version !== 2) return fallback;
+    if (version !== 1 && version !== 2 && version !== 3) return fallback;
 
     const rawStatus = String(parsed.paymentVerificationStatus ?? "");
     const isValidStatus =
@@ -297,6 +310,7 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
       statusUpdatedAt: typeof parsed.statusUpdatedAt === "string" ? parsed.statusUpdatedAt : undefined,
       statusUpdatedBy: isOrderStatusActor(parsedStatusUpdatedBy) ? parsedStatusUpdatedBy : undefined,
       cancelledBy: isOrderCancellationActor(parsedCancelledBy) ? parsedCancelledBy : undefined,
+      billDeletedAt: typeof parsed.billDeletedAt === "string" ? parsed.billDeletedAt : undefined,
     };
   } catch {
     return fallback;
@@ -304,8 +318,8 @@ const parseOrderNotePayload = (raw: string | null | undefined, paymentMethod: Pa
 };
 
 const serializeOrderNotePayload = (order: OrderRecord) => {
-  const payload: OrderNotePayloadV2 = {
-    v: 2,
+  const payload: OrderNotePayloadV3 = {
+    v: 3,
     shopNote: order.note || "",
     paymentVerificationStatus: order.paymentVerificationStatus,
     onlinePaymentReference: order.onlinePaymentReference || "",
@@ -316,6 +330,7 @@ const serializeOrderNotePayload = (order: OrderRecord) => {
     statusUpdatedAt: order.statusUpdatedAt,
     statusUpdatedBy: order.statusUpdatedBy,
     cancelledBy: order.cancelledBy,
+    billDeletedAt: order.billDeletedAt,
   };
   return JSON.stringify(payload);
 };
@@ -334,6 +349,7 @@ const normalizeOrderRecord = (order: OrderRecord): OrderRecord => {
     statusUpdatedAt: order.statusUpdatedAt ?? parsed.statusUpdatedAt ?? order.createdAt,
     statusUpdatedBy: order.statusUpdatedBy ?? parsed.statusUpdatedBy ?? "system",
     cancelledBy: order.cancelledBy ?? parsed.cancelledBy,
+    billDeletedAt: order.billDeletedAt ?? parsed.billDeletedAt,
   };
 };
 
@@ -551,6 +567,7 @@ const buildStateFromRemote = (
         statusUpdatedAt: noteMeta.statusUpdatedAt ?? row.created_at,
         statusUpdatedBy: noteMeta.statusUpdatedBy ?? "system",
         cancelledBy: noteMeta.cancelledBy,
+        billDeletedAt: noteMeta.billDeletedAt,
         note: noteMeta.shopNote,
         subtotal: Number(row.subtotal),
         items: (itemMap.get(row.id) ?? []).map((item) => ({
@@ -1129,6 +1146,7 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
       statusUpdatedAt: new Date().toISOString(),
       statusUpdatedBy: "shopkeeper",
       cancelledBy: undefined,
+      billDeletedAt: undefined,
       items,
       subtotal,
       note: note.trim(),
@@ -1277,20 +1295,38 @@ export const TobacoProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const clearAllOrders = async (): Promise<ClearOrdersResult> => {
-    if (isSupabaseConfigured) {
-      const { error: itemError } = await supabase.from("order_items").delete().neq("id", "");
-      if (itemError) {
-        return { ok: false, message: `Unable to remove order items: ${itemError.message}` };
-      }
+    const nowIso = new Date().toISOString();
+    const targetOrderIds = state.orders
+      .filter((order) => order.status === "accepted" && !order.billDeletedAt && isBillWithinRetention(order.createdAt))
+      .map((order) => order.id);
 
-      const { error: orderError } = await supabase.from("orders").delete().neq("id", "");
-      if (orderError) {
-        return { ok: false, message: `Unable to remove orders: ${orderError.message}` };
+    if (targetOrderIds.length === 0) {
+      return { ok: true, message: "No visible bills to delete." };
+    }
+
+    const nextOrders = state.orders.map((order) =>
+      targetOrderIds.includes(order.id) ? { ...order, billDeletedAt: nowIso } : order,
+    );
+
+    if (isSupabaseConfigured) {
+      const updatedRows = nextOrders
+        .filter((order) => targetOrderIds.includes(order.id))
+        .map((order) => orderToRow(order));
+      const { error } = await supabase.from("orders").upsert(updatedRows, { onConflict: "id" });
+      if (error) {
+        return { ok: false, message: `Unable to update bill visibility: ${error.message}` };
       }
     }
 
-    setState((prev) => ({ ...prev, orders: [] }));
-    return { ok: true, message: "All old bills/orders removed. New bills will start from 1." };
+    setState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) => (targetOrderIds.includes(order.id) ? { ...order, billDeletedAt: nowIso } : order)),
+    }));
+
+    return {
+      ok: true,
+      message: `${targetOrderIds.length} bill(s) deleted from bill list. Revenue/KPI backup is preserved.`,
+    };
   };
 
   const value = useMemo<TobacoContextValue>(

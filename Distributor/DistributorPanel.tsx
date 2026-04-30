@@ -43,8 +43,9 @@ const formatDateTime = (date: string) =>
 
 const ITEM_NUMBER_START = 1;
 const ITEM_NUMBER_MAX = 9999;
-const TREND_DAYS = 7;
-const HEATMAP_DAYS = 30;
+const DEFAULT_REPORT_DAYS = 28;
+const BILL_AUTO_DELETE_DAYS = 28;
+const REPORT_RANGE_OPTIONS = [1, 7, 14, 28] as const;
 
 const formatDateKey = (value: Date) =>
   `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -63,6 +64,20 @@ const formatHeatmapLabel = (value: Date) =>
 
 const compactInr = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
 type DeleteTarget = { type: "item" | "shop"; id: string; label: string } | null;
+
+const startOfDay = (value: Date) => {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const isWithinRecentDays = (dateValue: string, days: number, now = new Date()) => {
+  const timestamp = Date.parse(dateValue);
+  if (!Number.isFinite(timestamp)) return false;
+  const cutoff = startOfDay(now);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  return timestamp >= cutoff.getTime();
+};
 
 const DistributorPanel = () => {
   const { section: rawSection } = useParams();
@@ -105,6 +120,7 @@ const DistributorPanel = () => {
     Record<string, { username: string; displayName: string; shopId: string; active: boolean; useGstBill: boolean }>
   >({});
   const [itemSearchQuery, setItemSearchQuery] = useState("");
+  const [reportDays, setReportDays] = useState<number>(DEFAULT_REPORT_DAYS);
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
   const [isAddShopOpen, setIsAddShopOpen] = useState(false);
@@ -212,15 +228,20 @@ const DistributorPanel = () => {
     );
   }, [sortedProducts, itemSearchQuery]);
 
+  const ordersInSelectedRange = useMemo(
+    () => orders.filter((order) => isWithinRecentDays(order.createdAt, reportDays)),
+    [orders, reportDays],
+  );
+
   const stats = useMemo(() => {
-    const accepted = orders.filter((order) => order.status === "accepted");
-    const pending = orders.filter((order) => order.status === "pending");
+    const accepted = ordersInSelectedRange.filter((order) => order.status === "accepted");
+    const pending = ordersInSelectedRange.filter((order) => order.status === "pending");
     return {
-      totalOrders: orders.length,
+      totalOrders: ordersInSelectedRange.length,
       acceptedRevenue: accepted.reduce((sum, order) => sum + order.subtotal, 0),
       pendingRevenue: pending.reduce((sum, order) => sum + order.subtotal, 0),
     };
-  }, [orders]);
+  }, [ordersInSelectedRange]);
 
   const paymentOrderStats = useMemo(() => {
     const cashOrders = orders.filter((order) => order.paymentMethod === "cash").length;
@@ -236,9 +257,8 @@ const DistributorPanel = () => {
     const buckets: Array<{ key: string; label: string; amount: number }> = [];
     const indexByKey = new Map<string, number>();
 
-    for (let offset = TREND_DAYS - 1; offset >= 0; offset -= 1) {
-      const day = new Date(now);
-      day.setHours(0, 0, 0, 0);
+    for (let offset = reportDays - 1; offset >= 0; offset -= 1) {
+      const day = startOfDay(now);
       day.setDate(now.getDate() - offset);
       const key = formatDateKey(day);
       indexByKey.set(key, buckets.length);
@@ -249,7 +269,7 @@ const DistributorPanel = () => {
       });
     }
 
-    for (const order of orders) {
+    for (const order of ordersInSelectedRange) {
       if (order.status !== "accepted") continue;
       const createdAt = new Date(order.createdAt);
       if (Number.isNaN(createdAt.getTime())) continue;
@@ -263,7 +283,7 @@ const DistributorPanel = () => {
       label: item.label,
       amount: Number(item.amount.toFixed(2)),
     }));
-  }, [orders]);
+  }, [ordersInSelectedRange, reportDays]);
 
   const todayShopOrderSheet = useMemo(() => {
     const todayKey = formatDateKey(new Date());
@@ -323,9 +343,8 @@ const DistributorPanel = () => {
     const buckets: Array<{ key: string; label: string; amount: number }> = [];
     const indexByKey = new Map<string, number>();
 
-    for (let offset = HEATMAP_DAYS - 1; offset >= 0; offset -= 1) {
-      const day = new Date(now);
-      day.setHours(0, 0, 0, 0);
+    for (let offset = reportDays - 1; offset >= 0; offset -= 1) {
+      const day = startOfDay(now);
       day.setDate(now.getDate() - offset);
       const key = formatDateKey(day);
       indexByKey.set(key, buckets.length);
@@ -336,7 +355,7 @@ const DistributorPanel = () => {
       });
     }
 
-    for (const order of orders) {
+    for (const order of ordersInSelectedRange) {
       if (order.status !== "accepted") continue;
       const createdAt = new Date(order.createdAt);
       if (Number.isNaN(createdAt.getTime())) continue;
@@ -361,7 +380,18 @@ const DistributorPanel = () => {
         levelClass,
       };
     });
-  }, [orders]);
+  }, [ordersInSelectedRange, reportDays]);
+
+  const visibleAcceptedBills = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.status === "accepted" &&
+          !order.billDeletedAt &&
+          isWithinRecentDays(order.createdAt, BILL_AUTO_DELETE_DAYS),
+      ),
+    [orders],
+  );
 
   const handleItemPhotoChange =
     (mode: "add" | "edit") => (event: ChangeEvent<HTMLInputElement>) => {
@@ -585,7 +615,7 @@ const DistributorPanel = () => {
       toast({ title: "Clear bills failed", description: result.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Bills cleared", description: result.message });
+    toast({ title: "Bills updated", description: result.message });
   };
 
   const handlePrintBill = (orderId: string) => {
@@ -652,16 +682,34 @@ const DistributorPanel = () => {
     return (
       <Card>
         <CardHeader className="gradient-burgundy text-primary-foreground rounded-t-xl">
-          <CardTitle className="text-xl">Distributor Dashboard</CardTitle>
-          <CardDescription className="text-primary-foreground/85">Revenue and order status.</CardDescription>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <CardTitle className="text-xl">Distributor Dashboard</CardTitle>
+              <CardDescription className="text-primary-foreground/85">Revenue and order status.</CardDescription>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-primary-foreground/85">Report Range</Label>
+              <select
+                className="h-9 rounded-md border border-primary-foreground/30 bg-transparent px-3 text-sm text-primary-foreground"
+                value={reportDays}
+                onChange={(event) => setReportDays(Number(event.target.value))}
+              >
+                {REPORT_RANGE_OPTIONS.map((days) => (
+                  <option key={days} value={days} className="text-foreground">
+                    Last {days} day{days > 1 ? "s" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="grid gap-4 pt-4 md:grid-cols-3">
-          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Accepted Revenue</div><div className="text-2xl font-bold text-primary">₹{stats.acceptedRevenue}</div></div>
-          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Pending Revenue</div><div className="text-2xl font-bold text-amber-700">₹{stats.pendingRevenue}</div></div>
-          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Total Orders</div><div className="text-2xl font-bold">{stats.totalOrders}</div></div>
+          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Accepted Revenue ({reportDays}d)</div><div className="text-2xl font-bold text-primary">₹{stats.acceptedRevenue}</div></div>
+          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Pending Revenue ({reportDays}d)</div><div className="text-2xl font-bold text-amber-700">₹{stats.pendingRevenue}</div></div>
+          <div className="rounded-lg border p-4"><div className="text-xs text-muted-foreground">Total Orders ({reportDays}d)</div><div className="text-2xl font-bold">{stats.totalOrders}</div></div>
           <div className="rounded-lg border p-4 md:col-span-3">
             <div className="text-sm font-semibold">Selling Trend (INR / Day)</div>
-            <div className="text-xs text-muted-foreground">Accepted orders for the last 7 days.</div>
+            <div className="text-xs text-muted-foreground">Accepted orders for the last {reportDays} day(s).</div>
             {distributorSalesTrend.some((entry) => entry.amount > 0) ? (
               <ChartContainer
                 config={{ amount: { label: "Sales", color: "hsl(var(--primary))" } }}
@@ -1060,25 +1108,26 @@ const DistributorPanel = () => {
   }
 
   if (section === "bills") {
-    const acceptedOrders = orders.filter((order) => order.status === "accepted");
     return (
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle className="text-xl">Bills</CardTitle>
-              <CardDescription>Accepted orders bill list.</CardDescription>
+              <CardDescription>
+                Accepted bills from last {BILL_AUTO_DELETE_DAYS} days. Older bills are auto-deleted from this list.
+              </CardDescription>
             </div>
             <Button variant="destructive" onClick={() => void handleClearAllBills()}>
-              Clear Old Bills
+              Delete Visible Bills
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {acceptedOrders.length === 0 ? <p className="text-sm text-muted-foreground">No finalized bills yet.</p> : (
+          {visibleAcceptedBills.length === 0 ? <p className="text-sm text-muted-foreground">No finalized bills in the last {BILL_AUTO_DELETE_DAYS} days.</p> : (
             <Table>
               <TableHeader><TableRow><TableHead>Bill</TableHead><TableHead>Shop</TableHead><TableHead>Date</TableHead><TableHead>Amount</TableHead><TableHead>Download</TableHead></TableRow></TableHeader>
-              <TableBody>{acceptedOrders.map((order) => <TableRow key={order.id}><TableCell>{order.id}</TableCell><TableCell>{order.shopName}</TableCell><TableCell>{formatDateTime(order.createdAt)}</TableCell><TableCell>₹{order.subtotal}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}>Print</Button><Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>Download</Button></div></TableCell></TableRow>)}</TableBody>
+              <TableBody>{visibleAcceptedBills.map((order) => <TableRow key={order.id}><TableCell>{order.id}</TableCell><TableCell>{order.shopName}</TableCell><TableCell>{formatDateTime(order.createdAt)}</TableCell><TableCell>₹{order.subtotal}</TableCell><TableCell><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => handlePrintBill(order.id)}>Print</Button><Button size="sm" variant="outline" onClick={() => handleDownloadBill(order.id)}>Download</Button></div></TableCell></TableRow>)}</TableBody>
             </Table>
           )}
         </CardContent>
@@ -1135,11 +1184,31 @@ const DistributorPanel = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <BarChart3 className="h-5 w-5 text-primary" />
-            Daily Selling Heat Map
-          </CardTitle>
-          <CardDescription>Last 30 days accepted INR. Green high, yellow medium, orange low, red very low.</CardDescription>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <BarChart3 className="h-5 w-5 text-primary" />
+                Daily Selling Heat Map
+              </CardTitle>
+              <CardDescription>
+                Last {reportDays} day(s) accepted INR. Green high, yellow medium, orange low, red very low.
+              </CardDescription>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Range</Label>
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={reportDays}
+                onChange={(event) => setReportDays(Number(event.target.value))}
+              >
+                {REPORT_RANGE_OPTIONS.map((days) => (
+                  <option key={days} value={days}>
+                    Last {days} day{days > 1 ? "s" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="mb-3 flex flex-wrap gap-2 text-xs">

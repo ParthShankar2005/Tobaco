@@ -55,6 +55,7 @@ export interface OrderRecord {
   statusUpdatedAt?: string;
   statusUpdatedBy?: OrderStatusActor;
   cancelledBy?: OrderCancellationActor;
+  billDeletedAt?: string;
   items: OrderLine[];
   subtotal: number;
   note: string;
